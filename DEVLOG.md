@@ -185,3 +185,40 @@ Bug fixed
   * It grew to the right from its anchor; it is now pinned by its bottom-right corner and grows left.
 * The integration goal scenario started on a meaningless tile
   * It used another planet's start-tile index on a different planet.
+
+## October 7th, 2026 - 3D archery, hex heatmaps - Commit 8
+
+Added:
+* Arrows fly in 3D: launched from the shoulder on the arc that reaches the aimed point, pulled by gravity and drifted by the wind; they collide with the ground, water, walls, rock, tree trunks and crowns and with the real body volumes of colonists and deer, and the impact point decides the body part (legs, arms, torso, neck, head, eyes; a deer's legs, body, neck or head)
+* Arrows stick where they hit: in the ground, in trunks and wooden walls (recoverable), and in colonists and deer (they move with them; part of them are recovered from a killed deer)
+* Aiming at the 3D point under the cursor (the body of a creature, or the ground) with a red arc showing the predicted flight and a ring at the impact, "blocked" when something is in the way
+* Terrain blocks line of sight and shots: from the bottom of a hollow you cannot see or shoot over its rim
+* First-person view (Tab while controlling a colonist): mouse look, walking relative to the view, crosshair, drawing and shooting the bow at the crosshair; Tab or Esc returns
+* Clothes can be taken off into the inventory and put back on: drag between the new "Worn" row and the grid, or right-click (Take off, Take off and drop, Wear)
+* Globe: temperature, elevation and precipitation maps coloured hexagon by hexagon with thin outlines, seas and lakes in grey; painted icons for hills, large hills, mountains and impassable mountains on their hexagons
+* Play-settings corner above the clock (RimWorld style): a grid button cycling off / always / around the cursor, and a steady readout of what lies under the cursor
+* Yellow star on the card of the colonist under direct control
+* Instant trait tooltips: effects listed with helpful ones in green and harmful ones in red
+* Inventory size shown with its slot count (8×4 = 32 slots)
+* Unit tests: launch solution, impact height → body part, arrows stuck in the ground and in trunks, terrain line of sight, taking clothes off and on
+
+Changed:
+* Look inspired by 8th Wonder of the World (reworked, not copied): lush saturated meadows with lighter brushed patches, warm reddish dirt with pebbles, gravel as small rounded stones in earth, dark faceted charcoal rock with pale lit tops and deep cracks, oak crowns as distinct round clumps with warm tops and deep undersides, richer daylight colour
+* Ponds lie in the natural low ground with gentle shores and a narrow mud band
+* Shot spread recalibrated for 3D aiming (novice 3.2°, master 0.6°, +2.5° when moving)
+* Passions removed (not in the specification): no flames next to skills
+* Messages appear under the colonist bar
+* Saves are version 3 (3D arrows, stuck arrows)
+* Final integration run: unit tests 79/79, part 1 13/13, part 2 10/10 scenarios (no logged errors); 1000×1000 at 95 fps, 1500×1500 at 76 fps
+
+Bug fixed
+* The terrain tooltip under the cursor blinked unreadably
+  * It was cleared on every frame the cursor stayed on the same cell and only shown on the frame it changed cell.
+* Lakes sat at the bottom of round craters
+  * The relief generator flattened the hills in a ring several pond-radii wide around every pond.
+* The aim line clung to the ground and dived into hollows
+  * It was drawn along the terrain height instead of along the arrow's flight.
+* Long messages slid under the colonist cards
+  * Both were anchored to the top of the screen.
+* Colonists could land on ground cut off from the cabin (and the bow) by water
+  * They were placed around the map centre without checking that it connects to the cabin door; they now land on the nearest connected ground.

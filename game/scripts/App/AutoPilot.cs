@@ -150,6 +150,16 @@ public partial class AutoPilot : Node
                     var it = p.Inventory.Entries.Select(e => e.Item).FirstOrDefault(i => i.Def.Id == id) ?? throw new InvalidOperationException($"no {id} in the inventory");
                     iv.Equip(it);
                 }
+                else if (arg.StartsWith("takeoff:"))
+                {
+                    string id = arg[8..];
+                    iv.TakeOff(p.Apparel.FirstOrDefault(a => a.Def.Id == id) ?? throw new InvalidOperationException($"not wearing {id}"));
+                }
+                else if (arg.StartsWith("wear:"))
+                {
+                    string id = arg[5..];
+                    iv.Wear(p.Inventory.Entries.Select(e => e.Item).FirstOrDefault(i => i.Def.Id == id) ?? throw new InvalidOperationException($"no {id} in the inventory"));
+                }
                 else throw new ArgumentException($"unknown inv action '{arg}'");
                 _wait = 0.5;
                 break;
@@ -172,6 +182,26 @@ public partial class AutoPilot : Node
                     Game.MouseOverride = null;
                 }
                 _wait = 0.5;
+                break;
+            }
+            case "fpv": Game.SetFirstPerson(arg == "on"); _wait = 0.5; break;
+            case "look":
+            {
+                // look=deer (turn toward the nearest live deer) or look=yawDeg,pitchDeg
+                if (arg == "deer")
+                {
+                    var p = Controlled;
+                    var deer = Game.Sim.Animals.Where(a => !a.Dead).OrderBy(a => SV2.Distance(a.Position, p.Position)).First();
+                    var to = deer.Position - p.Position;
+                    float dz = Game.Sim.GroundZ(deer.Position) + 1.0f - Game.Sim.EyePoint(p).Z;
+                    Game.Look(MathF.Atan2(to.Y, to.X), MathF.Atan2(dz, to.Length()));
+                }
+                else
+                {
+                    var parts = arg.Split(',');
+                    Game.Look(Mathf.DegToRad(F(parts[0])), Mathf.DegToRad(F(parts[1])));
+                }
+                _wait = 0.3;
                 break;
             }
             case "mapsize": Main.I.Setup.MapSize = int.Parse(arg); break;
@@ -335,7 +365,7 @@ public partial class AutoPilot : Node
             _graniteAtStart = sim.Map.Buildings.Count(b => b == Building.Granite);
             return sim.Map.CellCenter(sim.InteractionSpot(best, p.Position));
         }
-        if (what == "outside") return sim.FindStandableNear(new SV2(sim.Map.Width / 2f, sim.Map.Height / 2f), 10);
+        if (what == "outside") return sim.ConnectedSpotNear(new SV2(sim.Map.Width / 2f, sim.Map.Height / 2f), sim.Map.CellAt(Controlled.Position), 60);
         var parts = what.Split(',');
         return new SV2(F(parts[0]), F(parts[1]));
     }
@@ -460,7 +490,7 @@ public partial class AutoPilot : Node
     }
 
     /// <summary>Moves the nearest living deer into the open at a distance in front of the controlled colonist.</summary>
-    void DeerNear(float dist)
+    void DeerNear(float dist, Animal which = null)
     {
         var sim = Game.Sim;
         var p = Controlled;
@@ -469,7 +499,14 @@ public partial class AutoPilot : Node
             float ang = k * 0.4f;
             if (!sim.TryFindStandableNear(p.Position + new SV2(MathF.Cos(ang), MathF.Sin(ang)) * dist, 4, out var s)) continue; // water there
             if (!sim.LineOfSight(p.Position, s) || SV2.Distance(s, p.Position) < dist * 0.6f) continue;
-            var deer = sim.Animals.Where(a => !a.Dead).OrderBy(a => SV2.Distance(a.Position, p.Position)).First();
+            // the player must be able to click it: on screen and not under a HUD panel
+            var cam = Game.Camera.Camera;
+            var w = new Vector3(s.X, sim.Map.StandHeight(s.X, s.Y) + 0.9f, s.Y);
+            if (cam.IsPositionBehind(w)) continue;
+            var screen = cam.UnprojectPosition(w);
+            var vp = Game.GetViewport().GetVisibleRect().Size;
+            if (screen.X < 20 || screen.Y < 90 || screen.X > vp.X - 20 || screen.Y > vp.Y - 20 || OverUi(Game.Hud, screen)) continue;
+            var deer = which ?? sim.Animals.Where(a => !a.Dead).OrderBy(a => SV2.Distance(a.Position, p.Position)).First();
             deer.Position = s;
             deer.Path.Clear(); deer.PathIndex = 0;
             deer.State = AnimalState.Graze; deer.StateTimer = 2000;
@@ -511,7 +548,7 @@ public partial class AutoPilot : Node
             if (now >= next && pawn.WeaponCooldown == 0 && OverUi(Game.Hud, screen))
             {
                 // the deer is under a HUD panel: a click there would hit the panel, as for a player; bring it into the open
-                DeerNear(8f);
+                DeerNear(8f, deer);
                 next = now + 0.3;
                 return false;
             }
@@ -522,7 +559,7 @@ public partial class AutoPilot : Node
                 shots++;
                 next = now + 1.4;
                 // a fleeing deer that runs out of range is brought back into view (we test shooting, not tracking)
-                if (SV2.Distance(deer.Position, pawn.Position) > 18f) DeerNear(8f);
+                if (SV2.Distance(deer.Position, pawn.Position) > 18f) DeerNear(8f, deer);
             }
             return false;
         }, 120);
@@ -546,6 +583,8 @@ public partial class AutoPilot : Node
         {
             "bow" => p.Held?.Def == Defs.Bow,
             "bowaway" => p.Held == null && p.Inventory.CountOf(Defs.Bow) == 1,
+            "shirtoff" => p.Apparel.All(a => a.Def != Defs.TShirt) && p.Inventory.CountOf(Defs.TShirt) == 1,
+            "shirton" => p.Apparel.Any(a => a.Def == Defs.TShirt),
             "arrows" => p.Arrows > 0,
             "meat" => p.CountInInventory(Defs.Venison) > 0,
             "deerdead" => sim.Animals.Any(a => a.Dead) || sim.Items.Any(i => i.Def == Defs.Venison),

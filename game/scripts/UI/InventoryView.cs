@@ -9,10 +9,11 @@ using Remade.Things;
 namespace Remade.Game.UI;
 
 /// <summary>
-/// Stalker / Project Zomboid style inventory: the hands (one item: a weapon, or anything carried by hand) and one grid
-/// whose size follows the colonist's carrying capacity. Drag items between the grid and the hands (right mouse while
-/// dragging rotates), right-click for actions (take in hands, put away, eat, drop). A load bar shows carried mass
-/// against the load zones.
+/// Stalker / Project Zomboid style inventory: what is worn, the hands (one item: a weapon, or anything carried by
+/// hand) and one grid whose size follows the colonist's carrying capacity. Drag items between worn clothes, the grid
+/// and the hands (dragging clothes into the grid takes them off, dragging clothes onto "Worn" puts them on; right mouse
+/// while dragging rotates), right-click for actions (wear, take off, take in hands, put away, eat, drop). A load bar
+/// shows carried mass against the load zones.
 /// </summary>
 public partial class InventoryView : VBoxContainer
 {
@@ -21,10 +22,11 @@ public partial class InventoryView : VBoxContainer
     readonly Pawn _pawn;
     readonly Action _changed;
     Item _dragItem;
-    bool _dragFromHands;
+    bool _dragFromHands, _dragFromWorn;
     bool _dragRot;
     GridCanvas _grid;
     HandsSlot _hands;
+    WornStrip _worn;
 
     public InventoryView(GameSim sim, Pawn pawn, Action changed)
     {
@@ -37,6 +39,9 @@ public partial class InventoryView : VBoxContainer
     {
         foreach (var c in GetChildren()) c.QueueFree();
         AddChild(LoadBar());
+        AddChild(UiKit.Heading("Worn"));
+        _worn = new WornStrip(this) { Name = "WornStrip" };
+        AddChild(_worn);
         AddChild(UiKit.Heading("Hands"));
         _hands = new HandsSlot(this) { Name = "HandsSlot" };
         AddChild(_hands);
@@ -46,7 +51,7 @@ public partial class InventoryView : VBoxContainer
             : $"{held.Label} · {held.Mass:F2} kg", 14, UiKit.Muted));
         var g = _pawn.Inventory;
         AddChild(UiKit.Heading("Inventory"));
-        AddChild(UiKit.Label($"{g.W}×{g.H} slots  ·  {g.Mass:F2} kg", 14, UiKit.Muted));
+        AddChild(UiKit.Label($"{g.W}×{g.H} = {g.W * g.H} slots  ·  {g.Mass:F2} kg", 14, UiKit.Muted));
         _grid = new GridCanvas(this, g) { Name = "InventoryGrid" };
         AddChild(_grid);
     }
@@ -67,9 +72,25 @@ public partial class InventoryView : VBoxContainer
         Changed();
     }
 
+    /// <summary>Takes a worn garment off into the inventory, like the "Take off" menu entry (also used by the autopilot).</summary>
+    public void TakeOff(Item worn)
+    {
+        Log.Action($"inventory: Take off {worn}");
+        _sim.TakeOff(_pawn, worn);
+        Changed();
+    }
+
+    /// <summary>Puts on a garment from the inventory, like the "Wear" menu entry (also used by the autopilot).</summary>
+    public void Wear(Item it)
+    {
+        Log.Action($"inventory: Wear {it}");
+        _sim.WearFromInventory(_pawn, it);
+        Changed();
+    }
+
     void Changed()
     {
-        _dragItem = null; _dragFromHands = false;
+        _dragItem = null; _dragFromHands = false; _dragFromWorn = false;
         Rebuild();
         _changed?.Invoke();
     }
@@ -161,8 +182,13 @@ public partial class InventoryView : VBoxContainer
                 {
                     if (_owner._dragItem == null && held != null)
                     {
-                        _owner._dragItem = held; _owner._dragFromHands = true; _owner._dragRot = false;
+                        _owner._dragItem = held; _owner._dragFromHands = true; _owner._dragFromWorn = false; _owner._dragRot = false;
                         QueueRedraw(); _owner._grid.QueueRedraw();
+                    }
+                    else if (_owner._dragItem != null && _owner._dragFromWorn)
+                    {
+                        _owner._sim.Message("Take it off into the inventory first.", _owner._pawn.Position);
+                        _owner.Changed();
                     }
                     else if (_owner._dragItem != null && !_owner._dragFromHands)
                     {
@@ -257,7 +283,7 @@ public partial class InventoryView : VBoxContainer
                     if (_owner._dragItem == null && idx >= 0)
                     {
                         _owner._dragItem = Grid.Entries[idx].Item;
-                        _owner._dragFromHands = false;
+                        _owner._dragFromHands = false; _owner._dragFromWorn = false;
                         _owner._dragRot = Grid.Entries[idx].Rotated;
                         QueueRedraw(); _owner._hands.QueueRedraw();
                     }
@@ -289,7 +315,12 @@ public partial class InventoryView : VBoxContainer
     {
         var it = _dragItem;
         bool ok;
-        if (_dragFromHands)
+        if (_dragFromWorn)
+        {
+            ok = _sim.TakeOff(_pawn, it, cell.X, cell.Y, _dragRot);
+            if (ok) Log.Action($"inventory: took off {it} at {cell.X},{cell.Y}");
+        }
+        else if (_dragFromHands)
         {
             ok = _sim.MoveHeldToGrid(_pawn, cell.X, cell.Y, _dragRot);
             if (ok) Log.Action($"inventory: put {it} away at {cell.X},{cell.Y}");
@@ -301,6 +332,112 @@ public partial class InventoryView : VBoxContainer
         }
         if (!ok) _sim.Message("It does not fit there.", _pawn.Position);
         Changed();
+    }
+
+    void WornMenu(Item worn, Vector2 at)
+    {
+        var menu = new PopupMenu();
+        var actions = new List<Action>
+        {
+            () => _sim.TakeOff(_pawn, worn),
+            () => _sim.TakeOffAndDrop(_pawn, worn),
+        };
+        menu.AddItem("Take off (into the inventory)");
+        menu.AddItem("Take off and drop");
+        menu.IdPressed += id =>
+        {
+            Log.Action($"worn: {menu.GetItemText((int)id)} {worn}");
+            actions[(int)id]();
+            Changed();
+        };
+        AddChild(menu);
+        menu.Position = (Vector2I)at;
+        menu.Popup();
+    }
+
+    /// <summary>The clothes being worn, one 2×2 tile each: drag one into the grid to take it off, drop clothes here to wear them.</summary>
+    sealed partial class WornStrip : Control
+    {
+        readonly InventoryView _owner;
+        bool _hover;
+        const float Tile = 2 * Cell;
+
+        public WornStrip(InventoryView owner)
+        {
+            _owner = owner;
+            CustomMinimumSize = new Vector2(Math.Max(1, owner._pawn.Apparel.Count + 1) * (Tile + 6), Tile + 2);
+            MouseFilter = MouseFilterEnum.Stop;
+            SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+        }
+
+        Rect2 TileRect(int i) => new(i * (Tile + 6), 0, Tile, Tile);
+
+        int TileAt(Vector2 p)
+        {
+            for (int i = 0; i < _owner._pawn.Apparel.Count; i++) if (TileRect(i).HasPoint(p)) return i;
+            return -1;
+        }
+
+        public override void _Draw()
+        {
+            var worn = _owner._pawn.Apparel;
+            for (int i = 0; i < worn.Count; i++)
+            {
+                var r = TileRect(i);
+                DrawRect(r, new Color(0.02f, 0.03f, 0.04f, 0.85f));
+                if (!(_owner._dragFromWorn && _owner._dragItem == worn[i])) DrawItem(this, worn[i], r.Grow(-3), 1f);
+                DrawRect(r, new Color(UiKit.Line, 0.8f), false, 1);
+            }
+            // a free tile: where clothes are dropped to be worn
+            var free = TileRect(worn.Count);
+            bool dropping = _hover && _owner._dragItem != null && !_owner._dragFromWorn && _owner._dragItem.Def.Kind == ThingKind.Apparel;
+            DrawRect(free, new Color(0.02f, 0.03f, 0.04f, 0.6f));
+            DrawString(UiKit.Font, free.Position + new Vector2(6, Tile * 0.5f + 5), "wear", HorizontalAlignment.Left, -1, 13, new Color(UiKit.Muted, 0.6f));
+            DrawRect(free, dropping ? UiKit.Good : new Color(UiKit.Line, 0.5f), false, dropping ? 2 : 1);
+        }
+
+        public override void _GuiInput(InputEvent e)
+        {
+            var worn = _owner._pawn.Apparel;
+            if (e is InputEventMouseMotion mm)
+            {
+                int i = TileAt(mm.Position);
+                TooltipText = i >= 0 ? ItemTooltip(worn[i]) + "\nDrag into the inventory or right-click to take it off." : "Drop clothes here to put them on.";
+            }
+            else if (e is InputEventMouseButton mb && mb.Pressed)
+            {
+                int i = TileAt(mb.Position);
+                if (mb.ButtonIndex == MouseButton.Left)
+                {
+                    if (_owner._dragItem == null && i >= 0)
+                    {
+                        _owner._dragItem = worn[i]; _owner._dragFromWorn = true; _owner._dragFromHands = false; _owner._dragRot = false;
+                        QueueRedraw(); _owner._grid.QueueRedraw();
+                    }
+                    else if (_owner._dragItem != null && !_owner._dragFromWorn)
+                    {
+                        var it = _owner._dragItem;
+                        if (it.Def.Kind == ThingKind.Apparel) { Log.Action($"inventory: drag {it} onto Worn"); _owner._sim.WearFromInventory(_owner._pawn, it); }
+                        else _owner._sim.Message($"The {it.Def.Label} cannot be worn.", _owner._pawn.Position);
+                        _owner.Changed();
+                    }
+                    else if (_owner._dragFromWorn) { _owner._dragItem = null; _owner._dragFromWorn = false; QueueRedraw(); }
+                    AcceptEvent();
+                }
+                else if (mb.ButtonIndex == MouseButton.Right)
+                {
+                    if (_owner._dragItem != null) { _owner._dragRot = !_owner._dragRot; _owner._grid.QueueRedraw(); }
+                    else if (i >= 0) _owner.WornMenu(worn[i], mb.GlobalPosition);
+                    AcceptEvent();
+                }
+            }
+        }
+
+        public override void _Notification(int what)
+        {
+            if (what == NotificationMouseEnter) { _hover = true; QueueRedraw(); }
+            if (what == NotificationMouseExit) { _hover = false; QueueRedraw(); }
+        }
     }
 
     void ItemMenu(Item it, bool inHands, Vector2 at)
@@ -315,6 +452,7 @@ public partial class InventoryView : VBoxContainer
         {
             menu.AddItem(it.Def.Kind == ThingKind.Weapon ? "Equip" : "Take in hands"); actions.Add(() => _sim.EquipFromInventory(_pawn, it));
         }
+        if (it.Def.Kind == ThingKind.Apparel) { menu.AddItem("Wear"); actions.Add(() => _sim.WearFromInventory(_pawn, it)); }
         if (it.Def.Kind == ThingKind.Food) { menu.AddItem("Eat"); actions.Add(() => _sim.EatFromInventory(_pawn, it)); }
         menu.AddItem("Drop"); actions.Add(() => _sim.DropFromInventory(_pawn, it));
         menu.IdPressed += id =>

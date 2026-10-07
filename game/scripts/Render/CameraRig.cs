@@ -83,6 +83,28 @@ public partial class CameraRig : Node3D
         _attr.DofBlurAmount = Mathf.Lerp(0.045f, 0.018f, t);
     }
 
+    /// <summary>First-person view: the camera at the colonist's eyes, turned by yaw (sim facing angle) and pitch.</summary>
+    public bool FirstPerson { get; private set; }
+
+    public void SetFirstPerson(bool on)
+    {
+        FirstPerson = on;
+        Camera.Fov = on ? 72 : 34;
+        Camera.Near = on ? 0.05f : 0.3f;
+        DofEnabled = !on;
+        _attr.DofBlurFarEnabled = _attr.DofBlurNearEnabled = !on;
+    }
+
+    public void PlaceFirstPerson(Vector3 eye, float yaw, float pitch)
+    {
+        // sim facing 0 = +x (east), π/2 = +y (south = +Z in Godot)
+        var look = new Vector3(Mathf.Cos(yaw) * Mathf.Cos(pitch), Mathf.Sin(pitch), Mathf.Sin(yaw) * Mathf.Cos(pitch));
+        Camera.GlobalPosition = eye;
+        Camera.LookAt(eye + look, Vector3.Up);
+        Focus = _focusTarget = new Vector3(eye.X, HeightAt?.Invoke(eye.X, eye.Z) ?? 0f, eye.Z);
+        Yaw = _yawTarget = -yaw - Mathf.Pi * 0.5f; // the overhead view comes back behind the colonist
+    }
+
     /// <summary>Ground point under a screen position (ray against the horizontal plane at the focus height).</summary>
     public Vector3? GroundPoint(Vector2 screen, float planeY)
     {

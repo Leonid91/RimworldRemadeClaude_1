@@ -18,9 +18,11 @@ Play.bat --play          skip the menus: quick start on a default world
 choose a landing site on the globe (hover to see the hexagonal regions, click to select; only temperate forests can be
 settled in this version) → Next → choose a map size (300 up to 1500 cells, RimWorld's largest is 325) → Play.
 
-The globe shows each hexagonal region in one flat biome colour (a map is always a single biome), with a legend. The
-cursor label shows the region and the value of the active map: temperature (°C), elevation (m) or precipitation
-(mm/day). Lakes are inland water (fresh, light blue) and give their shore maps a lake beach; an **estuary** is a large
+The globe shows each hexagonal region in one flat biome colour (a map is always a single biome), with a legend, and a
+small painted icon on every hilly region: low hills, large hills, mountains, impassable mountains. The temperature,
+elevation and precipitation maps are coloured hexagon by hexagon too, with seas and lakes in grey so the land stands
+out. The cursor label shows the region and the value of the active map: temperature (°C), elevation (m) or
+precipitation (mm/day). Lakes are inland water (fresh, light blue) and give their shore maps a lake beach; an **estuary** is a large
 river widening into the sea — a settleable river tile, not open ocean. The region panel lists **Water** (Estuary,
 River / Creek, Coast, Lake shore or None), **Ground moisture** (how lush the vegetation, ponds and marshy patches are,
 wet ground and morning fog) and the **average wind** of the region next to the wind right now (hover the ⓘ rows).
@@ -39,7 +41,9 @@ wet ground and morning fog) and the **average wind** of the region next to the w
 | — move | W A S D (rebindable), Shift to sprint |
 | — interact | E: pick up items, gather berries, drink, open/close doors. With several things in reach, roll the mouse wheel to choose (they are highlighted and listed) |
 | — action menu | quick right click on a thing |
-| — aim / shoot | hold the right mouse button to aim (a red line shows your reach: bow range or melee reach, with the distance), left click to shoot or swing. You can move while aiming. Arrows and blows hit colonists too |
+| — aim / shoot | hold the right mouse button to aim: you aim at what is under the cursor — a deer's or a colonist's body at that height, or the ground — and a red arc shows the arrow's real flight up to where it will land (a ring marks the impact; "blocked" when something is in the way). Left click shoots, or swings without a bow. Arrows fly in 3D with gravity and a little wind drift; where they hit decides the body part (legs, torso, head…), they stick in the ground, trunks, walls and bodies and can be picked up again. Terrain, walls and rock block sight and shots, so from the bottom of a hollow you cannot shoot across its rim |
+| — first person | Tab (while controlling a colonist) looks through their eyes: the mouse turns the view, W A S D walk relative to it, hold right mouse to draw the bow at the crosshair, left click to shoot. Tab or Esc goes back. Without a controlled colonist Tab still selects the next colonist |
+| Grid | the button above the clock (RimWorld's play-settings corner) cycles the cell grid: off, always, around the cursor. What lies under the cursor is listed just above it |
 | Time | Space pause, 1 2 3 4 speeds (Normal, Fast, Faster, Ultra). The bar under the clock shows night, dawn, day and dusk for your latitude and season |
 | Panels | Bio, Equipment, Needs, Health tabs above the colonist panel. F2 planet view. Tab next colonist. F focus |
 
@@ -49,10 +53,12 @@ automatically on French/Belgian keyboard layouts).
 ## The colonist panel
 
 - **Bio** — full name, sex, biological age and chronological age in brackets when they differ (cryptosleep), traits
-  (hover a trait to see exactly what it changes, e.g. "Move speed +15 %"), 12 skills from 0 to 20 with passions.
+  (hover a trait: its effects appear at once, helpful ones in green and harmful ones in red), 12 skills from 0 to 20.
 - **Equipment** — a body figure with layer tabs (Skin, Middle, Outer, Headgear, Eyes, Belt) showing what is worn where
-  and what is free (everyone starts in a white cotton T-shirt and jeans); the **hands** and one **inventory** grid whose
-  size follows how much the colonist can carry (about one slot per kilogram of their march load, 8 columns).
+  and what is free (everyone starts in a white cotton T-shirt and jeans); what is **worn** (drag a garment into the
+  inventory to take it off, drag clothes onto "wear" to put them on, or right-click: Take off / Take off and drop /
+  Wear); the **hands** and one **inventory** grid whose size follows how much the colonist can carry (about one slot per
+  kilogram of their march load, 8 columns, e.g. 8×4 = 32 slots).
   Drag an item from the grid onto the hands to hold it, drag what you hold back into the grid (or right click:
   Equip / Take in hands / Put away / Eat / Drop); right click while dragging rotates. A bow must be in the hands to
   shoot. The load bar shows the carried mass against the colonist's carrying capacity (body mass, +20 % with the

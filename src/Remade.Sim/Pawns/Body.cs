@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Remade.Core;
+using Remade.Diagnostics;
 using Remade.Things;
 
 namespace Remade.Pawns;
@@ -54,6 +55,38 @@ public sealed class BodyDef
     public IEnumerable<BodyPartDef> InRegion(BodyRegion r)
     {
         foreach (var p in Parts) if (p.Region == r) yield return p;
+    }
+
+    /// <summary>A part of a body region, weighted by how exposed each part is (its hit weight).</summary>
+    public int PickInRegion(BodyRegion r, ref Rng rng)
+    {
+        float total = 0;
+        foreach (var p in Parts) if (p.Region == r) total += p.HitWeight;
+        Invariant.Check(total > 0, $"{Name} has no parts in region {r}");
+        float roll = rng.NextFloat() * total;
+        foreach (var p in Parts)
+        {
+            if (p.Region != r) continue;
+            roll -= p.HitWeight;
+            if (roll <= 0) return p.Index;
+        }
+        foreach (var p in Parts) if (p.Region == r) return p.Index;
+        throw new InvalidOperationException("unreachable");
+    }
+
+    /// <summary>One of the named parts, weighted by hit weight.</summary>
+    public int PickPart(ref Rng rng, params string[] names)
+    {
+        float total = 0;
+        foreach (var n in names) total += Parts[Find(n)].HitWeight;
+        float roll = rng.NextFloat() * total;
+        foreach (var n in names)
+        {
+            int i = Find(n);
+            roll -= Parts[i].HitWeight;
+            if (roll <= 0) return i;
+        }
+        return Find(names[^1]);
     }
 
     public int PickHitPart(ref Rng rng)

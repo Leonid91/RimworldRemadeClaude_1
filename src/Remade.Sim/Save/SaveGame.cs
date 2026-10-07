@@ -43,7 +43,7 @@ public static class SaveGame
 {
     const uint Magic = 0x56535252; // "RRSV"
     /// <summary>2: single colonist inventory + hands slot, trait set with stat effects. Version 1 saves are not readable.</summary>
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     // ------------------------------------------------------------------ write
 
@@ -127,7 +127,7 @@ public static class SaveGame
         {
             if (an.DeathTick == -2) continue;
             w.Write(an.Id); w.Write(an.Kind); WriteV(w, an.Position); w.Write(an.Facing); w.Write((byte)an.State);
-            w.Write(an.StateTimer); w.Write(an.Herd); w.Write(an.Male); w.Write(an.Size); w.Write(an.EmbeddedArrows); w.Write(an.DeathTick);
+            w.Write(an.StateTimer); w.Write(an.Herd); w.Write(an.Male); w.Write(an.Size); WriteStuck(w, an.Embedded); w.Write(an.DeathTick);
             WriteHealth(w, an.Health);
             w.Write(an.ThinkTimer); w.Write(an.AnimTime); w.Write(an.Far);
             WritePath(w, an.Path, an.PathIndex);
@@ -135,7 +135,7 @@ public static class SaveGame
 
         Section(w, "items");
         w.Write(sim.Items.Count);
-        foreach (var it in sim.Items) { WriteItem(w, it); WriteV(w, it.Position); w.Write(it.Rotation); }
+        foreach (var it in sim.Items) { WriteItem(w, it); WriteV(w, it.Position); w.Write(it.Rotation); w.Write(it.StuckZ); WriteV3(w, it.StuckDir); }
 
         Section(w, "pawns");
         w.Write(sim.Pawns.Count);
@@ -145,8 +145,8 @@ public static class SaveGame
         w.Write(sim.Projectiles.Count);
         foreach (var pr in sim.Projectiles)
         {
-            WriteV(w, pr.Start); WriteV(w, pr.Pos); WriteV(w, pr.Dir);
-            w.Write(pr.Speed); w.Write(pr.MaxDist); w.Write(pr.Traveled); w.Write(pr.Damage); w.Write(pr.Shooter?.Id ?? -1);
+            WriteV3(w, pr.Start); WriteV3(w, pr.Pos); WriteV3(w, pr.Vel);
+            w.Write(pr.Traveled); w.Write(pr.Age); w.Write(pr.Damage); w.Write(pr.Shooter?.Id ?? -1);
         }
         var doors = sim.AutoDoorsSnapshot();
         w.Write(doors.Count);
@@ -165,6 +165,7 @@ public static class SaveGame
     static void WritePawnRuntime(BinaryWriter w, Pawn p)
     {
         w.Write(p.WeaponCooldown); w.Write((byte)p.Anim); w.Write(p.AnimTime); w.Write(p.Aiming); WriteV(w, p.AimDir);
+        WriteStuck(w, p.Embedded);
         w.Write(p.LastJobLabel ?? "");
         WritePath(w, p.Path, p.PathIndex);
         var j = p.Job;
@@ -182,7 +183,6 @@ public static class SaveGame
         w.Write(p.Traits.Count);
         foreach (var t in p.Traits) w.Write(t.Id);
         w.Write(p.Skills);
-        foreach (var ps in p.Passions) w.Write((byte)ps);
         WriteHealth(w, p.Health);
         w.Write(p.Needs.Food); w.Write(p.Needs.Thirst); w.Write(p.Needs.Rest);
         w.Write(p.Apparel.Count);
@@ -220,6 +220,25 @@ public static class SaveGame
 
     static void Section(BinaryWriter w, string name) => w.Write("§" + name);
     static void WriteV(BinaryWriter w, Vector2 v) { w.Write(v.X); w.Write(v.Y); }
+    static void WriteV3(BinaryWriter w, Vector3 v) { w.Write(v.X); w.Write(v.Y); w.Write(v.Z); }
+
+    static void WriteStuck(BinaryWriter w, List<StuckArrow> list)
+    {
+        w.Write(list.Count);
+        foreach (var s in list) { WriteV3(w, s.Local); WriteV3(w, s.Dir); w.Write(s.Part); }
+    }
+
+    static void ReadStuck(BinaryReader r, List<StuckArrow> list, int parts, string who)
+    {
+        int n = r.ReadInt32();
+        if (n < 0 || n > 200) throw new SaveFormatException($"{who}: {n} stuck arrows");
+        for (int i = 0; i < n; i++)
+        {
+            var s = new StuckArrow { Local = ReadV3(r), Dir = ReadV3(r), Part = r.ReadInt32() };
+            if (s.Part < 0 || s.Part >= parts) throw new SaveFormatException($"{who}: stuck arrow in part {s.Part} of {parts}");
+            list.Add(s);
+        }
+    }
     static void WriteBytes(BinaryWriter w, byte[] a) { w.Write(a.Length); w.Write(a); }
     static void WriteArray(BinaryWriter w, ushort[] a)
     {
@@ -332,8 +351,10 @@ public static class SaveGame
                 var a = new Animal
                 {
                     Id = r.ReadInt32(), Kind = r.ReadString(), Position = ReadV(r), Facing = r.ReadSingle(), State = (AnimalState)r.ReadByte(),
-                    StateTimer = r.ReadInt32(), Herd = r.ReadInt32(), Male = r.ReadBoolean(), Size = r.ReadSingle(), EmbeddedArrows = r.ReadInt32(), DeathTick = r.ReadInt64(),
+                    StateTimer = r.ReadInt32(), Herd = r.ReadInt32(), Male = r.ReadBoolean(), Size = r.ReadSingle(),
                 };
+                ReadStuck(r, a.Embedded, a.Health.Body.Count, $"animal {a.Id}");
+                a.DeathTick = r.ReadInt64();
                 ReadHealth(r, a.Health, $"animal {a.Id}");
                 a.ThinkTimer = r.ReadInt32(); a.AnimTime = r.ReadSingle(); a.Far = r.ReadBoolean();
                 a.PathIndex = ReadPath(r, a.Path);
@@ -349,8 +370,13 @@ public static class SaveGame
                 var it = ReadItem(r);
                 var pos = ReadV(r);
                 float rot = r.ReadSingle();
-                sim.PlaceOnGround(it, pos);
+                float stuckZ = r.ReadSingle();
+                var stuckDir = ReadV3(r);
+                sim.PlaceOnGround(it, pos, exact: !float.IsNaN(stuckZ));
                 it.Rotation = rot;
+                it.StuckZ = stuckZ;
+                it.StuckDir = stuckDir;
+                if (it.Stuck && (it.Def != Defs.Arrow || it.Count != 1)) throw new SaveFormatException($"item {it}: only single arrows can be stuck");
             }
 
             section = "pawns"; Expect(r, "pawns");
@@ -379,7 +405,7 @@ public static class SaveGame
             int projectiles = r.ReadInt32();
             for (int i = 0; i < projectiles; i++)
             {
-                var pr = new Projectile { Start = ReadV(r), Pos = ReadV(r), Dir = ReadV(r), Speed = r.ReadSingle(), MaxDist = r.ReadSingle(), Traveled = r.ReadSingle(), Damage = r.ReadSingle() };
+                var pr = new Projectile { Start = ReadV3(r), Pos = ReadV3(r), Vel = ReadV3(r), Traveled = r.ReadSingle(), Age = r.ReadInt32(), Damage = r.ReadSingle() };
                 int shooter = r.ReadInt32();
                 pr.Shooter = shooter < 0 ? null : sim.Pawns.Find(x => x.Id == shooter) ?? throw new SaveFormatException($"projectile shooter {shooter} not found");
                 sim.Projectiles.Add(pr);
@@ -431,6 +457,7 @@ public static class SaveGame
     static (int item, int animal) ReadPawnRuntime(BinaryReader r, Pawn p)
     {
         p.WeaponCooldown = r.ReadInt32(); p.Anim = (PawnAnim)r.ReadByte(); p.AnimTime = r.ReadSingle(); p.Aiming = r.ReadBoolean(); p.AimDir = ReadV(r);
+        ReadStuck(r, p.Embedded, p.Health.Body.Count, p.Name);
         p.LastJobLabel = r.ReadString();
         p.PathIndex = ReadPath(r, p.Path);
         if (!r.ReadBoolean()) return (-1, -1);
@@ -464,7 +491,6 @@ public static class SaveGame
             if (skills[i] > 20) throw new InvalidDataException($"pawn {p.Id}: skill {(SkillId)i} = {skills[i]}");
             p.Skills[i] = skills[i];
         }
-        for (int i = 0; i < p.Passions.Length; i++) p.Passions[i] = (Passion)r.ReadByte();
         ReadHealth(r, p.Health, $"pawn {p.Id}");
         p.Needs.Food = r.ReadSingle(); p.Needs.Thirst = r.ReadSingle(); p.Needs.Rest = r.ReadSingle();
         int apparel = r.ReadInt32();
@@ -532,6 +558,7 @@ public static class SaveGame
     }
 
     static Vector2 ReadV(BinaryReader r) => new(r.ReadSingle(), r.ReadSingle());
+    static Vector3 ReadV3(BinaryReader r) => new(r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
 
     static void ReadBytes(BinaryReader r, byte[] into, string what)
     {

@@ -20,6 +20,8 @@ public sealed class PlanetBaker
     public readonly int Size;
     public readonly byte[][] Albedo = new byte[6][];   // RGBA8
     public readonly byte[][] Normal = new byte[6][];   // RGBA8: normal xyz, elevation
+    /// <summary>Map style only: the tile under each texel (RGB = 24-bit tile index), for per-hexagon heatmaps.</summary>
+    public readonly byte[][] Ids = new byte[6][];
     readonly float[][] _elev = new float[6][];
     readonly Planet _p;
 
@@ -178,6 +180,7 @@ public sealed class PlanetBaker
             Normal[f] = new byte[Size * Size * 4];
             _elev[f] = new float[Size * Size];
         }
+        for (int f = 0; f < 6; f++) if (!Natural) Ids[f] = new byte[Size * Size * 4];
         if (Natural)
         {
             BakeNatural();
@@ -228,6 +231,8 @@ public sealed class PlanetBaker
                 if (!water && e < 0) e = 1f;
                 int i = (y * n + x) * 4;
                 alb[i] = ToByte(col.X); alb[i + 1] = ToByte(col.Y); alb[i + 2] = ToByte(col.Z); alb[i + 3] = 255;
+                var ids = Ids[face];
+                ids[i] = (byte)(t & 255); ids[i + 1] = (byte)((t >> 8) & 255); ids[i + 2] = (byte)((t >> 16) & 255); ids[i + 3] = 255;
                 el[y * n + x] = e;
             }
         });
@@ -392,25 +397,15 @@ public sealed class PlanetBaker
 
     public enum OverlayKind { None, Temperature, Elevation, Precipitation }
 
-    /// <summary>Bakes low-resolution overlay faces (R8) from the climate simulation's current per-tile values.</summary>
-    public static byte[][] BakeOverlay(Planet p, OverlayKind kind, int size)
+    /// <summary>
+    /// The value an overlay shows for one tile, normalised to 0..1 for the shader's colour ramps:
+    /// temperature −45..+45 °C, precipitation √(mm/day / 30), elevation −6500..+6500 m (0.5 = sea level).
+    /// </summary>
+    public static float OverlayValue(Planet p, int tile, OverlayKind kind) => kind switch
     {
-        if (kind == OverlayKind.None || kind == OverlayKind.Elevation) throw new ArgumentException("overlay kind has no climate data", nameof(kind));
-        float[] src = kind == OverlayKind.Temperature ? (float[])p.Climate.Temperature.Clone() : (float[])p.Climate.Precipitation.Clone();
-        var faces = new byte[6][];
-        for (int f = 0; f < 6; f++) faces[f] = new byte[size * size];
-        Parallel.For(0, 6 * size, row =>
-        {
-            int face = row / size, y = row % size;
-            int hint = 0;
-            for (int x = 0; x < size; x++)
-            {
-                float u = (x + 0.5f) / size * 2f - 1f, v = (y + 0.5f) / size * 2f - 1f;
-                hint = p.Interpolate(FaceDir(face, u, v), hint, src, out float val);
-                float norm = kind == OverlayKind.Temperature ? (val + 45f) / 90f : MathF.Sqrt(MathF.Max(0f, val) / 30f);
-                faces[face][y * size + x] = ToByte(Math.Clamp(norm, 0f, 1f));
-            }
-        });
-        return faces;
-    }
+        OverlayKind.Temperature => Math.Clamp((p.Climate.Temperature[tile] + 45f) / 90f, 0f, 1f),
+        OverlayKind.Precipitation => Math.Clamp(MathF.Sqrt(MathF.Max(0f, p.Climate.Precipitation[tile]) / 30f), 0f, 1f),
+        OverlayKind.Elevation => Math.Clamp(0.5f + p.Elevation[tile] / 13000f, 0f, 1f),
+        _ => throw new ArgumentException("no overlay", nameof(kind)),
+    };
 }

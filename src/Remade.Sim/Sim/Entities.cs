@@ -47,7 +47,8 @@ namespace Remade.Sim
         public int Herd;
         public bool Male;
         public float Size = 1f;
-        public int EmbeddedArrows;
+        /// <summary>Arrows stuck in it (in its own frame).</summary>
+        public readonly List<StuckArrow> Embedded = new();
         public long DeathTick = -1;
         public float AnimTime;
         public readonly List<Vector2> Path = new();
@@ -69,17 +70,25 @@ namespace Remade.Sim
         public int MoveTimer;
     }
 
+    /// <summary>An arrow in flight, in 3D (x east, y south, z up; metres and metres per tick).</summary>
     public sealed class Projectile
     {
-        public Vector2 Start, Pos, Dir;
-        public float Speed;         // cells per tick
-        public float MaxDist;
+        public Vector3 Start, Pos, Vel;
         public float Traveled;
+        public int Age;
         public float Damage;
         public Pawn Shooter;
         public bool Done;
-        /// <summary>0..1 progress, for the visual arc.</summary>
-        public float Progress => MaxDist <= 0 ? 1f : Math.Clamp(Traveled / MaxDist, 0f, 1f);
+    }
+
+    /// <summary>
+    /// An arrow stuck in a creature, in the creature's frame: Local = (forward, right, height above its ground),
+    /// Dir the same way; Part = the body part it went into.
+    /// </summary>
+    public struct StuckArrow
+    {
+        public Vector3 Local, Dir;
+        public int Part;
     }
 
     public enum SimEventKind : byte
@@ -106,6 +115,8 @@ namespace Remade.Sim
         public bool Aim;
         /// <summary>Aim point in map space.</summary>
         public Vector2 AimPoint;
+        /// <summary>Height of the aim point (metres; NaN = chest height above the ground there).</summary>
+        public float AimZ = float.NaN;
         /// <summary>Edge-triggered: consumed by the next tick.</summary>
         public bool Fire;
     }

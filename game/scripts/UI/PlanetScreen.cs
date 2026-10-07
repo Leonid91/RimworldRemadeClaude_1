@@ -204,7 +204,7 @@ public partial class OverlayBar : VBoxContainer
         {
             PlanetBaker.OverlayKind.Temperature => new[] { C(0.30f, 0.10f, 0.55f), C(0.15f, 0.35f, 0.85f), C(0.55f, 0.85f, 0.95f), C(0.45f, 0.80f, 0.35f), C(0.98f, 0.85f, 0.25f), C(0.95f, 0.45f, 0.15f), C(0.75f, 0.10f, 0.10f) },
             PlanetBaker.OverlayKind.Precipitation => new[] { C(0.78f, 0.66f, 0.45f), C(0.70f, 0.78f, 0.40f), C(0.25f, 0.65f, 0.40f), C(0.15f, 0.50f, 0.80f), C(0.25f, 0.20f, 0.70f) },
-            _ => new[] { C(0.03f, 0.08f, 0.30f), C(0.35f, 0.65f, 0.85f), C(0.20f, 0.55f, 0.25f), C(0.75f, 0.75f, 0.35f), C(0.55f, 0.35f, 0.20f), C(0.95f, 0.95f, 0.97f) },
+            _ => new[] { C(0.20f, 0.55f, 0.25f), C(0.75f, 0.75f, 0.35f), C(0.55f, 0.35f, 0.20f), C(0.95f, 0.95f, 0.97f) },
         };
         var g = new Gradient();
         var offs = new float[stops.Length];
@@ -213,9 +213,9 @@ public partial class OverlayBar : VBoxContainer
         _ramp.Texture = new GradientTexture1D { Gradient = g, Width = 256 };
         (_legendTitle.Text, _legendMin.Text, _legendMax.Text) = k switch
         {
-            PlanetBaker.OverlayKind.Temperature => ("Natural temperature now (daily mean)", "-45 °C", "+45 °C"),
-            PlanetBaker.OverlayKind.Precipitation => ("Precipitation now", "dry", "30+ mm/day"),
-            _ => ("Elevation", "-6500 m", "+6500 m"),
+            PlanetBaker.OverlayKind.Temperature => ("Natural temperature now (daily mean) · seas in grey", "-45 °C", "+45 °C"),
+            PlanetBaker.OverlayKind.Precipitation => ("Precipitation now · seas in grey", "dry", "30+ mm/day"),
+            _ => ("Elevation · seas in grey (darker = deeper)", "sea level", "3000 m and above"),
         };
     }
 

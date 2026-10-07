@@ -1,13 +1,18 @@
 // Planet surface: smooth sphere shaded from baked cubemaps (albedo with rivers, object-space normals + elevation)
-// and an optional dynamic data overlay (temperature / precipitation from the climate simulation, or elevation).
+// and an optional data overlay (temperature / precipitation from the climate simulation, or elevation) coloured
+// per hexagon: a tile-id cubemap tells which tile is under each pixel and a small per-tile texture holds the values,
+// so the map reads like the biome map (one colour per region, thin outlines) and seas are shown in grey.
 shader_type spatial;
 render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
 uniform samplerCube albedo_map : source_color, filter_linear_mipmap, repeat_disable;
 uniform samplerCube normal_map : filter_linear_mipmap, repeat_disable;   // rgb = object normal * 0.5 + 0.5, a = elevation 0..1 (0.5 = sea level)
-uniform samplerCube overlay_map : filter_linear, repeat_disable;         // r = overlay value 0..1
+uniform samplerCube tile_ids : filter_nearest, repeat_disable;          // rgb = 24-bit tile index
+uniform sampler2D tile_data : filter_nearest, repeat_disable;           // per tile: r = overlay value 0..1, g = water
+uniform int data_width = 512;
+uniform float tile_angle = 0.017;                                       // radians between tile centres
 uniform int overlay_mode = 0;      // 0 none, 1 temperature, 2 elevation, 3 precipitation
-uniform float overlay_strength = 0.92;
+uniform float overlay_strength = 1.0;
 uniform float time_scroll = 0.0;
 uniform bool map_style = false; // flat map look (landing site, in-game planet): matte water, no sun glare
 uniform int debug_mode = 0; // 1: agreement of baked normal with the geometric normal (white = correct)
@@ -66,6 +71,11 @@ void vertex() {
 	obj_pos = VERTEX;
 }
 
+int tile_at(vec3 d) {
+	vec3 c = texture(tile_ids, d).rgb;
+	return int(c.r * 255.0 + 0.5) + int(c.g * 255.0 + 0.5) * 256 + int(c.b * 255.0 + 0.5) * 65536;
+}
+
 void fragment() {
 	vec3 dir = normalize(obj_pos);
 	vec3 base = texture(albedo_map, dir).rgb;
@@ -76,11 +86,20 @@ void fragment() {
 
 	vec3 col = base;
 	if (overlay_mode != 0) {
-		vec3 oc;
-		if (overlay_mode == 2) oc = ramp_elevation(elev);
-		else {
-			float v = texture(overlay_map, dir).r;
-			oc = overlay_mode == 1 ? ramp_temperature(v) : ramp_precip(v);
+		int id = tile_at(dir);
+		vec2 dv = texelFetch(tile_data, ivec2(id % data_width, id / data_width), 0).rg;
+		vec3 oc = overlay_mode == 1 ? ramp_temperature(dv.r) : overlay_mode == 2 ? ramp_elevation(dv.r) : ramp_precip(dv.r);
+		if (dv.g > 0.5) {
+			// seas and lakes in grey (brighter = higher value) so the land stands out
+			float g = dot(oc, vec3(0.3, 0.55, 0.15));
+			oc = vec3(0.16 + 0.34 * g);
+		}
+		// thin hexagon outlines once a tile spans enough pixels to read them
+		vec3 ddx = dFdx(dir), ddy = dFdy(dir);
+		float px_per_tile = tile_angle / max(length(ddx), 1e-6);
+		if (px_per_tile > 7.0) {
+			bool edge = tile_at(normalize(dir + ddx)) != id || tile_at(normalize(dir + ddy)) != id;
+			if (edge) oc *= mix(1.0, 0.72, smoothstep(7.0, 14.0, px_per_tile));
 		}
 		col = mix(col, pow(oc, vec3(2.2)), overlay_strength); // ramps are authored in sRGB, like the UI legends
 	}
@@ -98,6 +117,7 @@ void fragment() {
 	METALLIC = 0.0;
 	// a hint of rim light on the night side so the globe never reads as a flat disk
 	float rim = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
-	EMISSION = vec3(0.05, 0.09, 0.16) * rim * 0.6 + col * 0.015;
+	// heatmaps glow a little so their colours read evenly across the lit and shaded side
+	EMISSION = vec3(0.05, 0.09, 0.16) * rim * 0.6 + col * (overlay_mode != 0 ? 0.3 : 0.015);
 	if (debug_mode == 1) { EMISSION = col; ALBEDO = vec3(0.0); }
 }

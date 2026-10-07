@@ -22,7 +22,8 @@ public partial class Hud : CanvasLayer
     readonly VBoxContainer _messages;
     readonly PanelContainer _prompt;
     readonly VBoxContainer _promptList;
-    readonly Label _aimInfo, _hoverInfo;
+    readonly Label _aimInfo, _readout;
+    readonly Crosshair _crosshair;
     double _slow;
     public Control PauseMenu { get; private set; }
     public WorldOverlay World { get; private set; }
@@ -79,15 +80,31 @@ public partial class Hud : CanvasLayer
         }
         tv.AddChild(_speeds);
         root.AddChild(tp);
+        // above the time panel (RimWorld's corner): what is under the cursor, then the play settings row, then fps
+        var corner = UiKit.VBox(4);
+        corner.SetAnchorsPreset(Control.LayoutPreset.BottomRight);
+        corner.GrowHorizontal = Control.GrowDirection.Begin;
+        corner.GrowVertical = Control.GrowDirection.Begin;
+        corner.OffsetRight = -12; corner.OffsetBottom = -12 - 206 - 6;
+        corner.OffsetLeft = -12 - 318; corner.OffsetTop = corner.OffsetBottom - 10;
+        corner.MouseFilter = Control.MouseFilterEnum.Ignore;
+        _readout = UiKit.Label("", 14, UiKit.Text, align: HorizontalAlignment.Right);
+        _readout.Name = "CursorReadout";
+        _readout.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.85f));
+        _readout.AddThemeConstantOverride("outline_size", 5);
+        corner.AddChild(_readout);
+        var play = UiKit.HBox(4);
+        play.Alignment = BoxContainer.AlignmentMode.End;
+        play.Name = "PlaySettings";
+        play.AddChild(new GridToggle { Name = "GridToggle" });
+        corner.AddChild(play);
         _fps = UiKit.Label("", 12, new Color(UiKit.Muted, 0.7f), align: HorizontalAlignment.Right);
-        _fps.SetAnchorsPreset(Control.LayoutPreset.BottomRight);
-        _fps.Position = new Vector2(-330, -238);
-        _fps.CustomMinimumSize = new Vector2(318, 0);
-        root.AddChild(_fps);
+        corner.AddChild(_fps);
+        root.AddChild(corner);
 
         // messages (top left)
         _messages = UiKit.VBox(4);
-        _messages.Position = new Vector2(14, 14);
+        _messages.Position = new Vector2(14, 84); // under the colonist bar
         root.AddChild(_messages);
 
         // direct-control prompt (bottom centre)
@@ -103,10 +120,10 @@ public partial class Hud : CanvasLayer
         _aimInfo = UiKit.Label("", 15, new Color(1f, 0.5f, 0.45f), bold: true);
         _aimInfo.Visible = false;
         root.AddChild(_aimInfo);
-        _hoverInfo = UiKit.Label("", 14, UiKit.Text);
-        _hoverInfo.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.8f));
-        _hoverInfo.AddThemeConstantOverride("outline_size", 5);
-        root.AddChild(_hoverInfo);
+
+        _crosshair = new Crosshair { Name = "Crosshair", Visible = false };
+        _crosshair.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        root.AddChild(_crosshair);
 
         Inspect = new InspectPanel(sim);
         root.AddChild(Inspect);
@@ -126,8 +143,16 @@ public partial class Hud : CanvasLayer
             card.MouseFilter = Control.MouseFilterEnum.Stop;
             var v = UiKit.VBox(2);
             card.AddChild(v);
-            var name = UiKit.Label(p.Name, 15, UiKit.Text, bold: true);
-            v.AddChild(name);
+            var top = UiKit.HBox(4);
+            top.Name = "Top";
+            top.AddChild(UiKit.Label(p.Name, 15, UiKit.Text, bold: true));
+            top.AddChild(UiKit.Expander());
+            var star = UiKit.Label("★", 17, new Color(1f, 0.84f, 0.2f), bold: true);
+            star.Name = "Star";
+            star.TooltipText = "Under your direct control";
+            star.Visible = false;
+            top.AddChild(star);
+            v.AddChild(top);
             var mode = UiKit.Label("", 12, UiKit.Muted);
             mode.Name = "Mode";
             v.AddChild(mode);
@@ -159,7 +184,8 @@ public partial class Hud : CanvasLayer
             if (c is not PanelContainer card || i >= _sim.Pawns.Count) continue;
             var p = _sim.Pawns[i++];
             var v = card.GetChild(0);
-            ((Label)v.GetNode("Mode")).Text = p.Dead ? "dead" : p.Mode switch { ControlMode.Direct => "◆ controlled", ControlMode.Drafted => "drafted", _ => p.LastJobLabel };
+            ((Label)v.GetNode("Mode")).Text = p.Dead ? "dead" : p.Mode switch { ControlMode.Direct => "controlled", ControlMode.Drafted => "drafted", _ => p.LastJobLabel };
+            ((Label)v.GetNode("Top/Star")).Visible = !p.Dead && p.Mode == ControlMode.Direct;
             ((ProgressBar)v.GetNode("NeedF")).Value = p.Needs.Food;
             ((ProgressBar)v.GetNode("NeedT")).Value = p.Needs.Thirst;
             ((ProgressBar)v.GetNode("NeedS")).Value = p.Needs.Rest;
@@ -229,11 +255,16 @@ public partial class Hud : CanvasLayer
         _aimInfo.Position = screen + new Vector2(22, 10);
     }
 
-    public void ShowHover(string text, Vector2 screen)
+    /// <summary>First-person reticle at the screen centre: a small cross, a ring with range ticks while aiming.</summary>
+    public void SetCrosshair(bool visible, bool aiming)
     {
-        _hoverInfo.Text = text ?? "";
-        _hoverInfo.Position = screen + new Vector2(18, -26);
+        _crosshair.Visible = visible;
+        if (_crosshair.Aiming != aiming) { _crosshair.Aiming = aiming; _crosshair.QueueRedraw(); }
     }
+
+    /// <summary>What lies under the cursor, shown at a fixed place (it only changes when the cursor moves to another cell).</summary>
+    public void SetReadout(string text) => _readout.Text = text;
+    public string Readout => _readout.Text;
 
     // ------------------------------------------------------------------ pause menu & planet view
 
@@ -392,5 +423,62 @@ public partial class DayBar : Control
         if (isDay) DrawCircle(mc, 7, new Color(1f, 0.85f, 0.35f));
         else { DrawCircle(mc, 7, new Color(0.9f, 0.92f, 1f)); DrawCircle(mc + new Vector2(3, -2), 6, night); }
         DrawCircle(mc, 7.5f, new Color(0, 0, 0, 0.5f), false, 1.5f);
+    }
+}
+
+/// <summary>
+/// Play-settings button (RimWorld's bottom-right row): the cell grid, cycling Off → Always → Around the cursor.
+/// Drawn as a small grid glyph; the state is shown by colour and a dot.
+/// </summary>
+public partial class GridToggle : Button
+{
+    public GridToggle()
+    {
+        CustomMinimumSize = new Vector2(34, 30);
+        FocusMode = FocusModeEnum.None;
+        Pressed += () =>
+        {
+            Settings.GridMode = (Settings.GridMode + 1) % 3;
+            Settings.Save();
+            Remade.Diagnostics.Log.Action($"grid mode {Settings.GridMode}");
+            UpdateTip();
+            QueueRedraw();
+        };
+        UpdateTip();
+    }
+
+    void UpdateTip() => TooltipText = "Grid: " + Settings.GridMode switch { 0 => "off", 1 => "always shown", _ => "shown around the cursor" } + "\n(click to change)";
+
+    public override void _Draw()
+    {
+        var c = Settings.GridMode == 0 ? new Color(UiKit.Muted, 0.6f) : UiKit.Accent;
+        var r = new Rect2(8, 6, 18, 18);
+        for (int k = 0; k <= 3; k++)
+        {
+            DrawLine(new Vector2(r.Position.X + k * 6, r.Position.Y), new Vector2(r.Position.X + k * 6, r.End.Y), c, 1.5f);
+            DrawLine(new Vector2(r.Position.X, r.Position.Y + k * 6), new Vector2(r.End.X, r.Position.Y + k * 6), c, 1.5f);
+        }
+        if (Settings.GridMode == 2) DrawCircle(new Vector2(r.End.X + 2, r.End.Y + 2), 3.5f, new Color(1f, 0.84f, 0.2f));
+    }
+}
+
+/// <summary>The first-person reticle (drawn at the centre of the screen).</summary>
+public partial class Crosshair : Control
+{
+    public bool Aiming;
+    public Crosshair() { MouseFilter = MouseFilterEnum.Ignore; }
+
+    public override void _Draw()
+    {
+        var c = Size * 0.5f;
+        var col = Aiming ? new Color(1f, 0.35f, 0.3f, 0.95f) : new Color(1f, 1f, 1f, 0.8f);
+        float gap = Aiming ? 5 : 3, len = Aiming ? 12 : 7;
+        foreach (var d in new[] { Vector2.Up, Vector2.Down, Vector2.Left, Vector2.Right })
+        {
+            DrawLine(c + d * gap + new Vector2(1, 1), c + d * (gap + len) + new Vector2(1, 1), new Color(0, 0, 0, 0.6f), 2.5f);
+            DrawLine(c + d * gap, c + d * (gap + len), col, 2f);
+        }
+        if (Aiming) DrawArc(c, 22, 0, Mathf.Tau, 48, new Color(col, 0.6f), 1.5f, true);
+        DrawCircle(c, 1.5f, col);
     }
 }

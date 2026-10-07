@@ -15,6 +15,11 @@ public sealed class Item
     public Vector2 Position;
     /// <summary>Random yaw for ground rendering (radians).</summary>
     public float Rotation;
+    /// <summary>An arrow stuck in the ground, a trunk or a wall: the height of its tip (NaN when lying flat) and the
+    /// direction it points (x east, y south, z up).</summary>
+    public float StuckZ = float.NaN;
+    public Vector3 StuckDir;
+    public bool Stuck => !float.IsNaN(StuckZ);
     /// <summary>Storage provided by containers (satchel, pockets); travels with the item.</summary>
     public readonly InventoryGrid Contents;
 

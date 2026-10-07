@@ -55,7 +55,7 @@ public partial class MapRenderer : Node3D
         _terrainMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/terrain.gdshader") };
         _terrainMat.SetShaderParameter("noise_tex", ProcTextures.Noise);
         _rockMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/rock.gdshader") };
-        _rockMat.SetShaderParameter("granite", ProcTextures.Granite);
+        _rockMat.SetShaderParameter("noise_tex", ProcTextures.Noise);
         _waterMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/water.gdshader") };
         _waterMat.SetShaderParameter("noise_tex", ProcTextures.Noise);
         _waterMat.RenderPriority = 1;
@@ -124,6 +124,13 @@ void fragment() {
     }
 
     public Texture2D HeightTexture => _heightTex;
+
+    /// <summary>Cell grid on the ground: mode 0 off, 1 everywhere, 2 within a few metres of the cursor.</summary>
+    public void SetGrid(int mode, GV2 cursor)
+    {
+        _terrainMat.SetShaderParameter("grid_mode", mode);
+        _terrainMat.SetShaderParameter("cursor_pos", cursor);
+    }
 
     /// <summary>Zoomed out beyond the grass blades, the ground's meadow tint takes over their colour.</summary>
     public void SetCameraDistance(float camDistance) => _terrainMat.SetShaderParameter("far_view", Mathf.SmoothStep(85f, 95f, camDistance));

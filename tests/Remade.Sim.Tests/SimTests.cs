@@ -735,3 +735,126 @@ public class MiningTests
         Assert.Null(p.Job);
     }
 }
+
+public class BallisticsTests
+{
+    static void Run(GameSim sim, int ticks) { for (int i = 0; i < ticks; i++) sim.Step(); }
+
+    /// <summary>A flat open 40×40 map at 1 m above the water, with an archer and a target colonist.</summary>
+    static (GameSim sim, Pawn archer, Pawn target) Range()
+    {
+        var planet = new Planet(new WorldParams { Seed = 1, Frequency = 16 });
+        var map = new LocalMap(40, 40, 0, 1);
+        Array.Fill(map.Ground, 1f);
+        var sim = new GameSim(planet, map, 3);
+        int id = 1;
+        var pawns = PawnGenerator.GenerateGroup(2, 3, () => id++);
+        var archer = pawns[0]; var target = pawns[1];
+        archer.Traits.Clear(); target.Traits.Clear();
+        archer.Skills[(int)SkillId.Shooting] = 20;
+        archer.Position = new Vector2(10.5f, 20.5f);
+        target.Position = new Vector2(16.5f, 20.5f);
+        target.Facing = MathF.PI; // facing the archer
+        sim.Pawns.Add(archer); sim.Pawns.Add(target);
+        sim.SetMode(archer, ControlMode.Drafted);
+        sim.SetMode(target, ControlMode.Drafted);
+        var bow = new Item(sim.NewId(), Defs.Bow, 1);
+        archer.Held = bow;
+        Assert.True(archer.Inventory.TryInsert(new Item(sim.NewId(), Defs.Arrow, 20)));
+        return (sim, archer, target);
+    }
+
+    [Fact]
+    public void LaunchAngleReachesTheTargetPoint()
+    {
+        var from = new System.Numerics.Vector3(0, 0, 1.4f);
+        foreach (var to in new[] { new System.Numerics.Vector3(20, 0, 1.0f), new System.Numerics.Vector3(8, 6, 3.5f), new System.Numerics.Vector3(30, -10, -2f) })
+        {
+            var v = GameSim.LaunchVelocity(from, to);
+            Assert.Equal(GameSim.ArrowSpeed, v.Length(), 4);
+            var p = from;
+            float d = new Vector2(to.X - from.X, to.Y - from.Y).Length();
+            while (new Vector2(p.X - from.X, p.Y - from.Y).Length() < d) { v.Z -= GameSim.Gravity; p += v; }
+            Assert.InRange(p.Z, to.Z - 0.1f, to.Z + 0.1f);
+        }
+    }
+
+    [Fact]
+    public void ImpactHeightDecidesTheBodyPart()
+    {
+        var (sim, archer, target) = Range();
+        float ground = sim.GroundZ(target.Position), h = GameSim.BodyHeight(target);
+        sim.Attack(archer, new System.Numerics.Vector3(target.Position, ground + h * 0.25f), moving: false);
+        Run(sim, 30);
+        Assert.Single(target.Embedded);
+        var leg = target.Health.Body[target.Embedded[0].Part].Region;
+        Assert.Contains(leg, new[] { BodyRegion.LegL, BodyRegion.LegR });
+        archer.WeaponCooldown = 0;
+        sim.Attack(archer, new System.Numerics.Vector3(target.Position, ground + h * 0.95f), moving: false);
+        Run(sim, 30);
+        Assert.Equal(2, target.Embedded.Count);
+        var head = target.Health.Body[target.Embedded[1].Part].Region;
+        Assert.Contains(head, new[] { BodyRegion.Head, BodyRegion.Eyes });
+    }
+
+    [Fact]
+    public void MissedArrowsStickInTheGroundAndInTrunks()
+    {
+        var (sim, archer, target) = Range();
+        target.Position = new Vector2(30.5f, 5.5f); // out of the way
+        // the ground 8 m ahead
+        for (int k = 0; k < 4; k++)
+        {
+            archer.WeaponCooldown = 0;
+            sim.Attack(archer, new System.Numerics.Vector3(18.5f, 20.5f, 1f), moving: false);
+            Run(sim, 40);
+        }
+        Assert.Contains(sim.Items, it => it.Def == Defs.Arrow && it.Stuck && MathF.Abs(it.StuckZ - 1f) < 0.1f && it.StuckDir.Z < 0);
+        // a full-grown oak 6 m ahead: shots at 1 m up stick in the trunk
+        int oak = sim.Map.Index(16, 24);
+        sim.Map.Plants[oak] = Plant.Oak;
+        sim.Map.PlantGrowth[oak] = 255;
+        archer.Position = new Vector2(10.5f, 24.5f);
+        int before = sim.Items.Count(it => it.Stuck);
+        for (int k = 0; k < 4; k++)
+        {
+            archer.WeaponCooldown = 0;
+            sim.Attack(archer, new System.Numerics.Vector3(16.5f, 24.5f, 2f), moving: false);
+            Run(sim, 40);
+        }
+        Assert.Contains(sim.Items, it => it.Stuck && sim.Map.CellAt(it.Position) == oak && it.StuckZ > 1.5f);
+    }
+
+    [Fact]
+    public void TerrainBlocksLineOfSight()
+    {
+        var (sim, archer, target) = Range();
+        Assert.True(sim.LineOfSight(archer.Position, target.Position));
+        // a 4 m ridge between them
+        for (int y = 0; y <= 40; y++) for (int x = 13; x <= 14; x++) sim.Map.Ground[y * 41 + x] = 5f;
+        Assert.False(sim.LineOfSight(archer.Position, target.Position));
+    }
+}
+
+public class ClothesTests
+{
+    [Fact]
+    public void ClothesGoIntoTheInventoryAndBackOn()
+    {
+        var sim = Fixtures.NewSim();
+        var p = sim.Pawns[0];
+        var shirt = p.Apparel.First(a => a.Def == Defs.TShirt);
+        Assert.True(sim.TakeOff(p, shirt));
+        Assert.DoesNotContain(shirt, p.Apparel);
+        Assert.Contains(p.Inventory.Entries, e => e.Item == shirt);
+        Assert.True(sim.WearFromInventory(p, shirt));
+        Assert.Contains(shirt, p.Apparel);
+        // a second pair of jeans cannot go on over the first
+        var jeans = new Item(sim.NewId(), Defs.Jeans, 1);
+        Assert.True(p.Inventory.TryInsert(jeans));
+        Assert.False(sim.WearFromInventory(p, jeans));
+        Assert.Contains(p.Inventory.Entries, e => e.Item == jeans);
+        sim.TakeOffAndDrop(p, shirt);
+        Assert.True(shirt.Spawned);
+    }
+}

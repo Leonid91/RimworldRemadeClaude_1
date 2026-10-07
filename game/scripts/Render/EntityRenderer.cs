@@ -11,9 +11,10 @@ namespace Remade.Game.Render;
 
 /// <summary>
 /// Draws the moving world: deer (two vertex-animated MultiMeshes, one draw call each regardless of count), colonists
-/// (jointed puppets), ground items, arrows in flight, the selection ring, the highlighted interaction target and the
-/// red aim line of the colonist under direct control. Visual positions ease toward the simulation positions so
-/// movement stays smooth between ticks.
+/// (jointed puppets), ground items, arrows in flight (in 3D), arrows stuck in the ground, trunks, walls and creatures,
+/// the selection ring, the highlighted interaction target and the aim arc of the colonist under direct control: the
+/// predicted 3D flight of the arrow up to where it would land. Visual positions ease toward the simulation positions
+/// so movement stays smooth between ticks.
 /// </summary>
 public partial class EntityRenderer : Node3D
 {
@@ -33,7 +34,17 @@ public partial class EntityRenderer : Node3D
     public Pawn Selected;
     public Interaction Target;
     public bool ShowAim;
+    /// <summary>The colonist whose eyes the first-person camera uses (not drawn), or -1.</summary>
+    public int HiddenPawnId = -1;
+    /// <summary>First person: only the impact marker, no arc (it would start inside the camera).</summary>
+    public bool ImpactOnly;
     public float AimRange;
+    /// <summary>The 3D point aimed at (sim space), and whether the predicted flight is stopped before reaching it.</summary>
+    public System.Numerics.Vector3 AimTarget;
+    public bool AimBlocked { get; private set; }
+    readonly List<System.Numerics.Vector3> _arc = new();
+    readonly MultiMeshInstance3D _embedded;
+    readonly MeshInstance3D _impact;
     /// <summary>Camera distance: the aim line keeps a constant on-screen width (it would vanish under a pixel when zoomed out).</summary>
     public float CamDistance = 34f;
 
@@ -54,6 +65,17 @@ public partial class EntityRenderer : Node3D
         aimMat.RenderPriority = 20;
         _aimLine = new MeshInstance3D { Mesh = _aimMesh, MaterialOverride = aimMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
         AddChild(_aimLine);
+        var impactMat = Glow(new Color(1f, 0.3f, 0.2f), 3f);
+        impactMat.NoDepthTest = true;
+        impactMat.RenderPriority = 20;
+        _impact = new MeshInstance3D { Mesh = Ring(0.22f, 0.04f), MaterialOverride = impactMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Visible = false };
+        AddChild(_impact);
+        _embedded = new MultiMeshInstance3D
+        {
+            Multimesh = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = Models.FlyingArrow, InstanceCount = 0 },
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Name = "EmbeddedArrows",
+        };
+        AddChild(_embedded);
     }
 
     static MultiMesh NewDeerMM(Mesh mesh) => new() { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseCustomData = true, Mesh = mesh, InstanceCount = 0 };
@@ -96,6 +118,7 @@ public partial class EntityRenderer : Node3D
         UpdatePawns(dt, simSpeed);
         UpdateItems();
         UpdateArrows();
+        UpdateEmbedded();
         UpdateMarkers(dt);
     }
 
@@ -158,6 +181,7 @@ public partial class EntityRenderer : Node3D
             }
             var pos = Smooth(-p.Id - 1, Ground(p.Position), dt);
             model.Animate(p, pos, dt, Math.Max(1f, simSpeed));
+            model.Visible = p.Id != HiddenPawnId;
         }
     }
 
@@ -174,6 +198,17 @@ public partial class EntityRenderer : Node3D
         {
             _seen.Add(it.Id);
             if (_items.ContainsKey(it.Id)) continue;
+            if (it.Stuck)
+            {
+                // an arrow stuck in the ground, a trunk or a wall: the tip a few centimetres in, pointing the way it flew
+                var dirS = new Vector3(it.StuckDir.X, it.StuckDir.Z, it.StuckDir.Y).Normalized();
+                var stuck = new MeshInstance3D { Mesh = Models.FlyingArrow, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+                AddChild(stuck);
+                stuck.Basis = Basis.LookingAt(dirS, Mathf.Abs(dirS.Y) > 0.98f ? Vector3.Forward : Vector3.Up);
+                stuck.Position = new Vector3(it.Position.X, it.StuckZ, it.Position.Y) - dirS * 0.3f;
+                _items[it.Id] = stuck;
+                continue;
+            }
             var mi = new MeshInstance3D { Mesh = Models.Item(it.Def) };
             mi.Position = Ground(it.Position, 0.01f);
             mi.Rotation = new Vector3(0, it.Rotation, 0);
@@ -205,16 +240,37 @@ public partial class EntityRenderer : Node3D
             if (i >= list.Count) { mi.Visible = false; continue; }
             var pr = list[i];
             mi.Visible = true;
-            float t = pr.Progress;
-            float arc = pr.MaxDist * 0.035f;
-            float start = _map.StandHeight(pr.Start.X, pr.Start.Y) + 1.45f;
-            float y = Mathf.Lerp(start, _map.StandHeight(pr.Pos.X, pr.Pos.Y) + 0.4f, t * t) + 4f * arc * t * (1f - t);
-            var pos = new Vector3(pr.Pos.X, y, pr.Pos.Y);
-            float slope = arc * 4f * (1f - 2f * t) / Math.Max(1f, pr.MaxDist) - 0.05f * t;
-            var dir = new Vector3(pr.Dir.X, slope, pr.Dir.Y).Normalized();
-            mi.Position = pos;
-            mi.Basis = Basis.LookingAt(dir, Vector3.Up);
+            var dir = new Vector3(pr.Vel.X, pr.Vel.Z, pr.Vel.Y).Normalized();
+            mi.Position = new Vector3(pr.Pos.X, pr.Pos.Z, pr.Pos.Y);
+            mi.Basis = Basis.LookingAt(dir, Mathf.Abs(dir.Y) > 0.98f ? Vector3.Forward : Vector3.Up);
         }
+    }
+
+    /// <summary>Arrows stuck in colonists and deer move with them (one MultiMesh for all).</summary>
+    void UpdateEmbedded()
+    {
+        var xf = new List<Transform3D>();
+        void Add(StuckArrow s, Vector3 visual, float facing)
+        {
+            var (pos, dir) = GameSim.StuckArrowWorld(s, new SV2(visual.X, visual.Z), facing, visual.Y);
+            var d = new Vector3(dir.X, dir.Z, dir.Y);
+            var b = Basis.LookingAt(d, Mathf.Abs(d.Y) > 0.98f ? Vector3.Forward : Vector3.Up);
+            xf.Add(new Transform3D(b, new Vector3(pos.X, pos.Z, pos.Y) - d * 0.3f));
+        }
+        foreach (var a in _sim.Animals)
+        {
+            if (a.Dead || a.Embedded.Count == 0 || !_visualPos.TryGetValue(a.Id, out var v)) continue;
+            foreach (var s in a.Embedded) Add(s, v, a.Facing);
+        }
+        foreach (var p in _sim.Pawns)
+        {
+            if (p.Dead || p.Embedded.Count == 0 || p.Anim == PawnAnim.Sleep || p.Id == HiddenPawnId) continue;
+            var v = PawnVisualPos(p);
+            foreach (var s in p.Embedded) Add(s, v, p.Facing);
+        }
+        var mm = _embedded.Multimesh;
+        if (mm.InstanceCount != xf.Count) mm.InstanceCount = xf.Count;
+        for (int i = 0; i < xf.Count; i++) mm.SetInstanceTransform(i, xf[i]);
     }
 
     // ------------------------------------------------------------------ markers
@@ -239,32 +295,51 @@ public partial class EntityRenderer : Node3D
         else _targetRing.Visible = false;
 
         _aimMesh.ClearSurfaces();
+        _impact.Visible = false;
+        AimBlocked = false;
         if (ShowAim && Selected != null)
         {
             var p = Selected;
-            var from = p.Position;
-            var dir = p.AimDir;
-            float halfWidth = Math.Max(0.035f, CamDistance * 0.0016f);
-            var side = new SV2(-dir.Y, dir.X) * halfWidth;
+            float halfWidth = Math.Max(0.03f, CamDistance * 0.0016f);
+            var cam = GetViewport().GetCamera3D();
+            var camPos = cam?.GlobalPosition ?? Vector3.Zero;
             _aimMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
-            int steps = Math.Max(2, (int)(AimRange / 0.5f));
-            for (int s = 0; s < steps; s++)
+            if (p.HasRangedWeapon && p.Arrows > 0)
             {
-                float t0 = 0.6f + (AimRange - 0.6f) * s / steps, t1 = 0.6f + (AimRange - 0.6f) * (s + 1) / steps;
-                var a = from + dir * t0; var b = from + dir * t1;
-                float ha = _map.StandHeight(a.X, a.Y) + 0.07f, hb = _map.StandHeight(b.X, b.Y) + 0.07f;
-                Quad(new Vector3(a.X - side.X, ha, a.Y - side.Y), new Vector3(a.X + side.X, ha, a.Y + side.Y),
-                     new Vector3(b.X + side.X, hb, b.Y + side.Y), new Vector3(b.X - side.X, hb, b.Y - side.Y));
+                // the predicted flight in 3D: from the bow along its arc to the first thing it would hit
+                int kind = _sim.PredictArrow(p, AimTarget, _arc, out var impact);
+                AimBlocked = kind != 0 && (impact - AimTarget).Length() > 0.6f;
+                for (int k = 0; k + 1 < _arc.Count && !ImpactOnly; k++)
+                {
+                    var a = new Vector3(_arc[k].X, _arc[k].Z, _arc[k].Y);
+                    var b = new Vector3(_arc[k + 1].X, _arc[k + 1].Z, _arc[k + 1].Y);
+                    Ribbon(a, b, camPos, halfWidth);
+                }
+                if (kind != 0)
+                {
+                    _impact.Visible = true;
+                    _impact.Position = new Vector3(impact.X, impact.Z + 0.02f, impact.Y);
+                    _impact.Scale = Vector3.One * Math.Max(1f, CamDistance / 30f);
+                }
             }
-            // range tick at the end
-            var end = from + dir * AimRange;
-            var tick = new SV2(-dir.Y, dir.X) * Math.Max(0.35f, halfWidth * 8f);
-            var along = dir * Math.Max(0.05f, halfWidth * 1.4f);
-            float he = _map.StandHeight(end.X, end.Y) + 0.07f;
-            Quad(new Vector3(end.X - tick.X - along.X, he, end.Y - tick.Y - along.Y), new Vector3(end.X + tick.X - along.X, he, end.Y + tick.Y - along.Y),
-                 new Vector3(end.X + tick.X + along.X, he, end.Y + tick.Y + along.Y), new Vector3(end.X - tick.X + along.X, he, end.Y - tick.Y + along.Y));
+            else
+            {
+                // melee: a short straight reach line at waist height
+                var from = Ground(p.Position, 0.9f);
+                var dir = new Vector3(p.AimDir.X, 0, p.AimDir.Y);
+                Ribbon(from + dir * 0.3f, from + dir * AimRange, camPos, halfWidth);
+            }
             _aimMesh.SurfaceEnd();
         }
+    }
+
+    /// <summary>A flat strip between two points, turned to face the camera.</summary>
+    void Ribbon(Vector3 a, Vector3 b, Vector3 camPos, float halfWidth)
+    {
+        var along = b - a;
+        if (along.LengthSquared() < 1e-8f) return;
+        var side = along.Cross(camPos - a).Normalized() * halfWidth;
+        Quad(a - side, a + side, b + side, b - side);
     }
 
     void Quad(Vector3 a, Vector3 b, Vector3 c, Vector3 d)

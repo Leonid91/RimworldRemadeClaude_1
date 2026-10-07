@@ -8,32 +8,6 @@ using Remade.Things;
 
 namespace Remade.Game.UI;
 
-/// <summary>Small flame glyph for skill passions (one flame = interested, two = burning passion).</summary>
-public partial class PassionIcon : Control
-{
-    readonly Passion _p;
-    public PassionIcon(Passion p) { _p = p; CustomMinimumSize = new Vector2(26, 18); MouseFilter = MouseFilterEnum.Ignore; }
-
-    public override void _Draw()
-    {
-        if (_p == Passion.None) return;
-        DrawFlame(new Vector2(7, 16), 1f);
-        if (_p == Passion.Major) DrawFlame(new Vector2(17, 16), 0.85f);
-    }
-
-    void DrawFlame(Vector2 b, float s)
-    {
-        var outer = new[]
-        {
-            b + new Vector2(-5, 0) * s, b + new Vector2(-5.5f, -6) * s, b + new Vector2(-2, -10) * s, b + new Vector2(-1, -14) * s,
-            b + new Vector2(2, -9) * s, b + new Vector2(4, -12) * s, b + new Vector2(5.5f, -5) * s, b + new Vector2(5, 0) * s,
-        };
-        DrawColoredPolygon(outer, UiKit.Passion);
-        var inner = new[] { b + new Vector2(-2.5f, 0) * s, b + new Vector2(-2.5f, -4) * s, b + new Vector2(0, -7.5f) * s, b + new Vector2(2.5f, -4) * s, b + new Vector2(2.5f, 0) * s };
-        DrawColoredPolygon(inner, new Color(1f, 0.88f, 0.45f));
-    }
-}
-
 /// <summary>"Create colonists": a wide, readable sheet per colonist with name, sex, ages, traits, skills, health and gear.</summary>
 public partial class ColonistScreen : ScreenBase
 {
@@ -131,8 +105,8 @@ public partial class ColonistScreen : ScreenBase
         foreach (var t in p.Traits)
         {
             var chip = UiKit.Panel(UiKit.Label(t.Label, 15), new Color(0.12f, 0.17f, 0.2f, 0.95f), 6);
-            chip.TooltipText = t.EffectsText();
-            chip.MouseFilter = MouseFilterEnum.Stop;
+            var trait = t;
+            HoverCard.Attach(chip, () => HoverCard.TraitLines(trait));
             flow.AddChild(chip);
         }
         c1.AddChild(flow);
@@ -148,7 +122,6 @@ public partial class ColonistScreen : ScreenBase
             var name = UiKit.Label(SkillLabel((SkillId)s), 16);
             name.CustomMinimumSize = new Vector2(120, 0);
             r.AddChild(name);
-            r.AddChild(new PassionIcon(p.Passions[s]));
             var bar = UiKit.Bar(p.Skills[s] / 20f, p.Skills[s] >= 10 ? UiKit.Accent : UiKit.AccentDim, 16);
             bar.CustomMinimumSize = new Vector2(200, 16);
             r.AddChild(bar);
@@ -168,7 +141,7 @@ public partial class ColonistScreen : ScreenBase
             c3.AddChild(UiKit.Label($"{a.Def.Label}  ·  {string.Join("/", a.Def.Layers.Select(l => l.ToString().ToLowerInvariant()))}", 15, UiKit.Muted));
         c3.AddChild(UiKit.Spacer(0, 8));
         c3.AddChild(UiKit.Heading("Carrying capacity"));
-        var cap = UiKit.Label($"Comfortable up to {p.CarryBasisKg * Pawn.LightLoad:F0} kg, max {p.CarryBasisKg * Pawn.MaxLoad:F0} kg  ·  inventory {p.Inventory.W}×{p.Inventory.H}", 15, UiKit.Muted);
+        var cap = UiKit.Label($"Comfortable up to {p.CarryBasisKg * Pawn.LightLoad:F0} kg, max {p.CarryBasisKg * Pawn.MaxLoad:F0} kg  ·  inventory {p.Inventory.W}×{p.Inventory.H} ({p.Inventory.W * p.Inventory.H} slots)", 15, UiKit.Muted);
         cap.TooltipText = $"Measured against {(p.CarryBasisKg != p.BodyMassKg ? $"{p.CarryBasisKg:F0} kg (body mass {p.BodyMassKg:F0} kg × traits)" : $"the body mass ({p.BodyMassKg:F0} kg)")}:\n" +
                           $"{Pawn.LightLoad * 100:F0} % comfortable, {Pawn.MarchLoad * 100:F0} % march load (slower), {Pawn.HeavyLoad * 100:F0} % heavy, {Pawn.MaxLoad * 100:F0} % maximum.\n" +
                           "Inventory slots: about one per kilogram of the march load.";

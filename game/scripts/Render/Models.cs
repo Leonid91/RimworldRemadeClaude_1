@@ -40,8 +40,8 @@ public static class Models
     }
 
     /// <summary>Oak leaf tint (sRGB) for the MultiMesh custom data; alpha = sway phase × 0.5.</summary>
-    public static readonly Color OakLeaf = new(0.32f, 0.5f, 0.14f);
-    public static readonly Color BushLeaf = new(0.2f, 0.36f, 0.14f);
+    public static readonly Color OakLeaf = new(0.30f, 0.56f, 0.12f);
+    public static readonly Color BushLeaf = new(0.22f, 0.44f, 0.12f);
 
     // ------------------------------------------------------------------ oak
 
@@ -163,10 +163,12 @@ public static class Models
             for (int i = 0; i < 4; i++)
             {
                 var p = corners[i];
-                var n = ((p - canopyC).Normalized() + Vector3.Up * 0.35f).Normalized();
+                // each clump is lit as its own ball (round, distinct clumps), a little of the whole crown's roundness
+                var n = ((p - center).Normalized() * 0.65f + (p - canopyC).Normalized() * 0.35f + Vector3.Up * 0.3f).Normalized();
                 float depth = Mathf.Clamp((p - canopyC).Length() / canopyR, 0f, 1.2f);
+                float inClump = Mathf.Clamp((p - center).Length() / Mathf.Max(radius, 0.05f), 0f, 1.2f);
                 float hy = Mathf.Clamp((p.Y - bottomY) / Mathf.Max(topY - bottomY, 0.1f), 0f, 1f);
-                float ao = Mathf.Lerp(0.5f, 1.05f, depth * 0.6f + hy * 0.4f);
+                float ao = Mathf.Lerp(0.5f, 1.05f, depth * 0.45f + hy * 0.3f + inClump * 0.25f);
                 mb.Add(p, n, uvs[i], new Color(ao, 0, 0));
             }
             mb.Tri(start, start + 2, start + 1);

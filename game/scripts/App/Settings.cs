@@ -38,6 +38,8 @@ public static class Settings
         new("focus", "Focus selected", Key.F),
         new("world", "Planet view", Key.F2),
         new("next_pawn", "Next colonist", Key.Tab),
+        // same key as "Next colonist": while a colonist is under direct control it switches the view instead
+        new("first_person", "First-person view (while controlling)", Key.Tab),
         new("menu", "Menu", Key.Escape),
     };
 
@@ -56,6 +58,8 @@ public static class Settings
     public static float MasterVolume = 0.8f, AmbienceVolume = 0.8f, EffectsVolume = 0.8f;
     // gameplay
     public static bool EdgePan = false;
+    /// <summary>Cell grid on the ground: 0 off, 1 always, 2 around the cursor.</summary>
+    public static int GridMode = 0;
     public static float UiScale = 1f;
 
     const string Path = "user://settings.cfg";
@@ -119,6 +123,7 @@ public static class Settings
         EffectsVolume = (float)(double)cfg.GetValue("audio", "effects", EffectsVolume);
         EdgePan = (bool)cfg.GetValue("gameplay", "edge_pan", EdgePan);
         UiScale = (float)(double)cfg.GetValue("gameplay", "ui_scale", UiScale);
+        GridMode = (int)(long)cfg.GetValue("gameplay", "grid", (long)GridMode);
         Validate();
         Log.Info($"Settings loaded from {ProjectSettings.GlobalizePath(Path)}");
     }
@@ -129,6 +134,7 @@ public static class Settings
         ShadowQuality = Math.Clamp(ShadowQuality, 0, 3);
         GrassDensity = Math.Clamp(GrassDensity, 0f, 1.5f);
         UiScale = Math.Clamp(UiScale, 0.75f, 1.5f);
+        GridMode = Math.Clamp(GridMode, 0, 2);
     }
 
     public static void Save()
@@ -148,6 +154,7 @@ public static class Settings
         cfg.SetValue("audio", "effects", EffectsVolume);
         cfg.SetValue("gameplay", "edge_pan", EdgePan);
         cfg.SetValue("gameplay", "ui_scale", UiScale);
+        cfg.SetValue("gameplay", "grid", (long)GridMode);
         var err = cfg.Save(Path);
         if (err != Error.Ok) throw new InvalidOperationException($"Could not write {Path}: {err}");
         Log.Info("Settings saved");

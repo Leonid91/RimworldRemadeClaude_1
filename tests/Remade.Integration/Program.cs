@@ -170,7 +170,7 @@ GameSim sim = null;
             Interactions.Execute(g, p, Interactions.Nearby(g, p).First(i => i.Item == arrows));
             Run(g, 60);
         }
-        Walk(g, p, g.FindStandableNear(new Vector2(300, 300), 10), 0.5f);
+        Walk(g, p, g.ConnectedSpotNear(new Vector2(300, 300), g.Map.CellAt(p.Position), 60), 0.5f);
         var deer = g.Animals.OrderBy(a => Vector2.Distance(a.Position, p.Position)).First();
         int shots = 0;
         bool Reach(Vector2 q) => g.Paths.Reachable(g.Map.CellAt(p.Position), g.Map.CellAt(q));

@@ -15,10 +15,10 @@ uniform float density_scale = 1.0;
 uniform int kind = 0;          // 0 grass, 1 yellow/white flowers, 2 purple/blue flowers
 uniform float slot_cells = 1.0; // cells per slot side (2 for the flower fields)
 uniform float slots_per_cell = 3.0;
-uniform vec3 base_col : source_color = vec3(0.16, 0.24, 0.06);
-uniform vec3 tip_col : source_color = vec3(0.55, 0.66, 0.22);
-uniform vec3 tip_col2 : source_color = vec3(0.40, 0.58, 0.16);
-uniform vec3 dry_col : source_color = vec3(0.66, 0.58, 0.30);
+uniform vec3 base_col : source_color = vec3(0.12, 0.26, 0.05);
+uniform vec3 tip_col : source_color = vec3(0.52, 0.74, 0.18);
+uniform vec3 tip_col2 : source_color = vec3(0.36, 0.62, 0.12);
+uniform vec3 dry_col : source_color = vec3(0.70, 0.62, 0.30);
 
 varying float vh;
 varying vec3 vcol;
@@ -79,7 +79,7 @@ void vertex() {
 	vec4 n2 = texture(noise_tex, origin * 0.11);
 	float s4 = mod(season, 4.0);
 	float season_dry = smoothstep(1.4, 2.0, s4) * (1.0 - smoothstep(3.4, 3.9, s4)) * 0.7;
-	float dry = smoothstep(0.58, 0.82, n.r) * 0.55 + season_dry;
+	float dry = smoothstep(0.66, 0.86, n.r) * 0.35 + season_dry;
 	vec3 tip = mix(tip_col, tip_col2, n2.g);
 	tip = mix(tip, dry_col, clamp(dry, 0.0, 1.0)) * (0.82 + 0.36 * h1);
 	vcol = mix(base_col, tip, smoothstep(0.0, 1.0, vh));

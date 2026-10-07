@@ -32,11 +32,12 @@ public partial class PlanetView : SubViewportContainer
     DirectionalLight3D _sun;
     MeshInstance3D _globe, _clouds, _atmo, _hexHover, _hexSel, _beacon;
     ShaderMaterial _surfaceMat, _cloudMat, _atmoMat;
-    Cubemap _overlayTex;
     PlanetBaker.OverlayKind _overlay = PlanetBaker.OverlayKind.None;
     int _overlayClimateVersion = -1;
-    Task<byte[][]> _overlayTask;
-    PlanetBaker.OverlayKind _overlayTaskKind;
+    Image _dataImg;          // per tile: r = overlay value 0..1, g = 1 for water
+    ImageTexture _dataTex;
+    const int DataWidth = 512;
+    MultiMeshInstance3D _icons;
     Task<PlanetBaker> _bakeTask;
     Action _onReady;
 
@@ -146,7 +147,6 @@ public partial class PlanetView : SubViewportContainer
             if (t.IsFaulted) throw new InvalidOperationException("Planet texture bake failed", t.Exception);
             ApplyBake(t.Result);
         }
-        PollOverlay();
         UpdateCamera((float)delta);
         if (Ready3D)
         {
@@ -155,8 +155,8 @@ public partial class PlanetView : SubViewportContainer
             _cloudOpacity = Mathf.MoveToward(_cloudOpacity, _overlay == PlanetBaker.OverlayKind.None ? 0.85f : 0.08f, (float)delta * 2f);
             _cloudMat.SetShaderParameter("opacity", _cloudOpacity);
             if (Mode == CameraMode.MenuLimb) _globeRoot.RotateY((float)delta * 0.012f);
-            if (_overlay is PlanetBaker.OverlayKind.Temperature or PlanetBaker.OverlayKind.Precipitation && Planet.Climate.Version != _overlayClimateVersion && _overlayTask == null)
-                StartOverlayBake(_overlay);
+            if (_overlay is PlanetBaker.OverlayKind.Temperature or PlanetBaker.OverlayKind.Precipitation && Planet.Climate.Version != _overlayClimateVersion)
+                UpdateOverlayData();
         }
     }
 
@@ -165,21 +165,23 @@ public partial class PlanetView : SubViewportContainer
         using var _ = Log.Time("PlanetView.ApplyBake (texture upload)", 400);
         _surfaceMat.SetShaderParameter("albedo_map", MakeCube(b.Albedo, b.Size, Image.Format.Rgba8, mipmaps: true));
         _surfaceMat.SetShaderParameter("normal_map", MakeCube(b.Normal, b.Size, Image.Format.Rgba8, mipmaps: true));
-        _overlayTex = MakeCube(BlankFaces(8), 8, Image.Format.R8, false);
-        _surfaceMat.SetShaderParameter("overlay_map", _overlayTex);
+        if (!b.Natural)
+        {
+            _surfaceMat.SetShaderParameter("tile_ids", MakeCube(b.Ids, b.Size, Image.Format.Rgba8, mipmaps: false));
+            int rows = (Planet.TileCount + DataWidth - 1) / DataWidth;
+            _dataImg = Image.CreateEmpty(DataWidth, rows, false, Image.Format.Rgf);
+            _dataTex = ImageTexture.CreateFromImage(_dataImg);
+            _surfaceMat.SetShaderParameter("tile_data", _dataTex);
+            _surfaceMat.SetShaderParameter("data_width", DataWidth);
+            _surfaceMat.SetShaderParameter("tile_angle", Planet.Grid.TileAngle);
+            BuildIcons();
+        }
         _surfaceMat.SetShaderParameter("map_style", Mode != CameraMode.MenuLimb);
         _globe.Visible = _atmo.Visible = true;
         _clouds.Visible = Mode == CameraMode.MenuLimb; // clouds only on the menu backdrop: they would hide the terrain
         Ready3D = true;
         Log.Info($"Globe ready ({b.Size}px faces, {Planet.TileCount} tiles)");
         _onReady?.Invoke();
-    }
-
-    static byte[][] BlankFaces(int size)
-    {
-        var f = new byte[6][];
-        for (int i = 0; i < 6; i++) f[i] = new byte[size * size];
-        return f;
     }
 
     static Cubemap MakeCube(byte[][] faces, int size, Image.Format fmt, bool mipmaps)
@@ -205,38 +207,63 @@ public partial class PlanetView : SubViewportContainer
     {
         _overlay = kind;
         Log.Action($"planet overlay {kind}");
-        int mode = kind switch { PlanetBaker.OverlayKind.Temperature => 1, PlanetBaker.OverlayKind.Elevation => 2, PlanetBaker.OverlayKind.Precipitation => 3, _ => 0 };
-        if (kind is PlanetBaker.OverlayKind.Temperature or PlanetBaker.OverlayKind.Precipitation)
-        {
-            _overlayClimateVersion = -1; // force a fresh bake; keep the old map visible until it arrives
-            if (_overlayTask == null) StartOverlayBake(kind);
-        }
-        else _surfaceMat.SetShaderParameter("overlay_mode", mode);
+        if (kind != PlanetBaker.OverlayKind.None) UpdateOverlayData();
+        _surfaceMat.SetShaderParameter("overlay_mode", kind switch { PlanetBaker.OverlayKind.Temperature => 1, PlanetBaker.OverlayKind.Elevation => 2, PlanetBaker.OverlayKind.Precipitation => 3, _ => 0 });
     }
 
-    void StartOverlayBake(PlanetBaker.OverlayKind kind)
+    /// <summary>Writes every tile's overlay value (and whether it is water) into the per-tile data texture.</summary>
+    void UpdateOverlayData()
     {
-        var planet = Planet;
-        _overlayTaskKind = kind;
-        _overlayClimateVersion = planet.Climate.Version;
-        _overlayTask = Task.Run(() => PlanetBaker.BakeOverlay(planet, kind, 160));
+        if (_dataImg == null) throw new InvalidOperationException("overlays need the map-style globe (tile ids)");
+        var p = Planet;
+        _overlayClimateVersion = p.Climate.Version;
+        int rows = _dataImg.GetHeight();
+        var buf = new float[DataWidth * rows * 2];
+        for (int t = 0; t < p.TileCount; t++)
+        {
+            buf[t * 2] = PlanetBaker.OverlayValue(p, t, _overlay);
+            buf[t * 2 + 1] = p.Water[t] != Remade.World.WaterBody.None ? 1f : 0f;
+        }
+        var bytes = new byte[buf.Length * 4];
+        Buffer.BlockCopy(buf, 0, bytes, 0, bytes.Length);
+        _dataImg.SetData(DataWidth, rows, false, Image.Format.Rgf, bytes);
+        _dataTex.Update(_dataImg);
     }
 
-    void PollOverlay()
+    // ------------------------------------------------------------------ relief icons
+
+    /// <summary>
+    /// Hills, mountains and impassable mountains drawn as small painted icons lying on their hexagon (one MultiMesh
+    /// quad per hilly land tile, kept well inside the hexagon).
+    /// </summary>
+    void BuildIcons()
     {
-        if (_overlayTask == null || !_overlayTask.IsCompleted) return;
-        var t = _overlayTask;
-        _overlayTask = null;
-        if (t.IsFaulted) throw new InvalidOperationException("Overlay bake failed", t.Exception);
-        for (int f = 0; f < 6; f++)
-            if (_overlayTex.GetWidth() == 160) _overlayTex.UpdateLayer(Image.CreateFromData(160, 160, false, Image.Format.R8, t.Result[f]), f);
-        if (_overlayTex.GetWidth() != 160)
+        var p = Planet;
+        var tiles = new List<int>();
+        for (int t = 0; t < p.TileCount; t++)
+            if (p.Water[t] == Remade.World.WaterBody.None && p.Hills[t] != Remade.World.Hilliness.Flat) tiles.Add(t);
+        var quad = new QuadMesh { Size = new Vector2(1, 1), Orientation = PlaneMesh.OrientationEnum.Z };
+        var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseCustomData = true, Mesh = quad, InstanceCount = tiles.Count };
+        float size = p.Grid.TileAngle * 0.78f;
+        for (int k = 0; k < tiles.Count; k++)
         {
-            _overlayTex = MakeCube(t.Result, 160, Image.Format.R8, false);
-            _surfaceMat.SetShaderParameter("overlay_map", _overlayTex);
+            var c = p.Grid.Centers[tiles[k]];
+            var n = new Vector3(c.X, c.Y, c.Z).Normalized();
+            var side = Mathf.Abs(n.Dot(Vector3.Up)) > 0.95f ? Vector3.Right : Vector3.Up;
+            // the icon's up points to the planet's north so the drawings stand upright on screen
+            var east = side.Cross(n).Normalized();
+            var north = n.Cross(east).Normalized();
+            var basis = new Basis(east * size, north * size, n * size);
+            mm.SetInstanceTransform(k, new Transform3D(basis, n * 1.0018f));
+            int kind = (int)p.Hills[tiles[k]] - 1; // 0 small hills, 1 large hills, 2 mountains, 3 impassable
+            mm.SetInstanceCustomData(k, new Color(kind / 4f + 0.01f, 0, 0, 0));
         }
-        if (_overlay == _overlayTaskKind)
-            _surfaceMat.SetShaderParameter("overlay_mode", _overlay == PlanetBaker.OverlayKind.Temperature ? 1 : 3);
+        var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/planet_icons.gdshader") };
+        mat.SetShaderParameter("atlas", ReliefIcons.Atlas);
+        _icons?.QueueFree();
+        _icons = new MultiMeshInstance3D { Multimesh = mm, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Name = "ReliefIcons" };
+        _globeRoot.AddChild(_icons);
+        Log.Info($"Globe relief icons: {tiles.Count} tiles");
     }
 
     // ------------------------------------------------------------------ camera & lighting

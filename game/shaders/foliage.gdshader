@@ -1,7 +1,9 @@
 // Leaf cards of oaks and bushes (look of the first prototype, RimworldTest): a painted leaf-cluster texture tinted per
 // instance (INSTANCE_CUSTOM.rgb, sRGB; a = sway phase), canopy ambient occlusion in COLOR.r, normals spherized around
 // the canopy for soft volume, back-lit translucency, wind sway growing with height, seasons (autumn hues, thinning
-// in winter), and a dithered line-of-sight cut so the focused colonist stays visible under the canopy.
+// in winter), and a dithered line-of-sight cut so the focused colonist stays visible under the canopy. Crowns are
+// painted as distinct round clumps (old isometric strategy games): each clump has a warm, sunlit top and a deep,
+// cool underside.
 shader_type spatial;
 render_mode world_vertex_coords, cull_disabled, diffuse_lambert_wrap, specular_schlick_ggx;
 
@@ -47,6 +49,10 @@ void fragment() {
 	ALPHA = cut > dither * 0.9 + 0.05 ? 0.0 : t.a * (1.0 - bare * 0.55);
 	ALPHA_SCISSOR_THRESHOLD = alpha_cut;
 	vec3 c = t.rgb * tint * shade;
+	// clump light: brighter, yellower tops, deeper undersides
+	float top = clamp(sph_n.y * 0.5 + 0.5, 0.0, 1.0);
+	c *= mix(0.72, 1.18, top);
+	c = mix(c, c * vec3(1.18, 1.12, 0.72), smoothstep(0.65, 0.95, top) * 0.55);
 	c = mix(c, vec3(0.6, 0.64, 0.71) * shade, snow_cover * smoothstep(0.3, 0.9, sph_n.y + 0.25) * 0.85);
 	c *= cloud_shadow(vorigin.xz) * 0.6 + 0.4;
 	c *= mix(1.0, 0.8, wetness);

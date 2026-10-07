@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Godot;
 
 namespace Remade.Game.UI;
@@ -187,4 +188,85 @@ public static class UiKit
 
     /// <summary>Colour from a 0xRRGGBB value (sRGB).</summary>
     public static Color Rgb(uint rgb) => new((rgb << 8) | 0xFFu);
+}
+
+/// <summary>
+/// A tooltip card that appears instantly under the cursor (Godot's built-in tooltips wait half a second) and shows
+/// coloured lines. One shared instance lives on top of everything.
+/// </summary>
+public partial class HoverCard : PanelContainer
+{
+    static HoverCard _instance;
+    readonly VBoxContainer _box;
+    Control _owner;
+
+    HoverCard()
+    {
+        TopLevel = true;
+        ZIndex = 100;
+        MouseFilter = MouseFilterEnum.Ignore;
+        AddThemeStyleboxOverride("panel", UiKit.PanelStyle(new Color(0.04f, 0.06f, 0.08f, 0.97f), UiKit.Line, 4, 8));
+        _box = UiKit.VBox(2);
+        _box.MouseFilter = MouseFilterEnum.Ignore;
+        AddChild(_box);
+        Visible = false;
+        Name = "HoverCard";
+    }
+
+    static HoverCard Instance(Control anyNode)
+    {
+        if (_instance != null && IsInstanceValid(_instance) && _instance.IsInsideTree()) return _instance;
+        _instance = new HoverCard();
+        anyNode.GetTree().Root.AddChild(_instance);
+        return _instance;
+    }
+
+    /// <summary>Makes <paramref name="target"/> show the lines (text, colour) instantly while hovered.</summary>
+    public static void Attach(Control target, Func<List<(string text, Color color)>> lines)
+    {
+        target.MouseFilter = MouseFilterEnum.Stop;
+        target.MouseEntered += () => Instance(target).ShowFor(target, lines());
+        target.MouseExited += () => { var c = Instance(target); if (c._owner == target) c.Hide(); };
+        target.TreeExiting += () => { if (_instance != null && IsInstanceValid(_instance) && _instance._owner == target) _instance.Hide(); };
+    }
+
+    void ShowFor(Control owner, List<(string text, Color color)> lines)
+    {
+        _owner = owner;
+        foreach (var c in _box.GetChildren()) { _box.RemoveChild(c); c.QueueFree(); }
+        foreach (var (text, color) in lines)
+        {
+            var l = UiKit.Label(text, 14, color);
+            l.MouseFilter = MouseFilterEnum.Ignore;
+            _box.AddChild(l);
+        }
+        Visible = true;
+        ResetSize();
+        Follow();
+    }
+
+    void Follow()
+    {
+        var vp = GetViewportRect().Size;
+        var p = GetGlobalMousePosition() + new Vector2(16, 18);
+        var size = GetCombinedMinimumSize();
+        p.X = Mathf.Min(p.X, vp.X - size.X - 4);
+        p.Y = Mathf.Min(p.Y, vp.Y - size.Y - 4);
+        GlobalPosition = p;
+    }
+
+    public override void _Process(double delta)
+    {
+        if (!Visible) return;
+        if (_owner == null || !IsInstanceValid(_owner) || !_owner.IsVisibleInTree()) { Hide(); return; }
+        Follow();
+    }
+
+    /// <summary>Trait effect lines: good effects in green, bad ones in red.</summary>
+    public static List<(string, Color)> TraitLines(Remade.Pawns.TraitDef t)
+    {
+        var list = new List<(string, Color)> { (t.Label, UiKit.Text) };
+        foreach (var (text, good) in t.EffectLines()) list.Add((text, good ? UiKit.Good : UiKit.Bad));
+        return list;
+    }
 }

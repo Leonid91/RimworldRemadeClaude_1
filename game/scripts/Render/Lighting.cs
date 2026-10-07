@@ -152,7 +152,7 @@ public partial class Lighting : Node3D
         _sky.GroundBottomColor = _sky.SkyHorizonColor.Lerp(_sky.SkyTopColor, 0.5f);
         _sky.SkyEnergyMultiplier = 0.4f + dayK * 0.8f;
         _sky.SkyCoverModulate = new Color(1, 1, 1, nightK * (1f - overcast));
-        _e.AdjustmentSaturation = Mathf.Lerp(0.9f, 1.08f, dayK) - overcast * 0.1f;
+        _e.AdjustmentSaturation = Mathf.Lerp(0.9f, 1.2f, dayK) - overcast * 0.12f;
         _e.TonemapExposure = Mathf.Lerp(1.3f, 0.95f, dayK);
         float low = warm;
 

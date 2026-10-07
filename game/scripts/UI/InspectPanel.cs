@@ -226,8 +226,8 @@ public partial class InspectPanel : Control
         foreach (var t in p.Traits)
         {
             var chip = UiKit.Panel(UiKit.Label(t.Label, 15), new Color(0.12f, 0.17f, 0.2f, 0.95f), 6);
-            chip.TooltipText = t.EffectsText();
-            chip.MouseFilter = MouseFilterEnum.Stop;
+            var trait = t;
+            HoverCard.Attach(chip, () => HoverCard.TraitLines(trait));
             flow.AddChild(chip);
         }
         c1.AddChild(flow);
@@ -241,7 +241,6 @@ public partial class InspectPanel : Control
             var name = UiKit.Label(ColonistScreen.SkillLabel((SkillId)s), 15);
             name.CustomMinimumSize = new Vector2(115, 0);
             r.AddChild(name);
-            r.AddChild(new PassionIcon(p.Passions[s]));
             var bar = UiKit.Bar(p.Skills[s] / 20f, p.Skills[s] >= 10 ? UiKit.Accent : UiKit.AccentDim, 14);
             bar.CustomMinimumSize = new Vector2(180, 14);
             r.AddChild(bar);

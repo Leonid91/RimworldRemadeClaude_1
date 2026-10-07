@@ -37,18 +37,6 @@ float cloud_shadow(vec2 world_xz) {
 	return 1.0 - c * 0.55 * clamp(daylight * 2.0, 0.0, 1.0);
 }
 
-// green foliage tint across the year: fresh spring, deep summer, golden autumn, dull winter
-vec3 season_foliage(vec3 summer_col, float variation) {
-	float s = mod(season, 4.0);
-	vec3 spring = summer_col * vec3(1.1, 1.2, 0.8) + vec3(0.006, 0.01, 0.0);
-	vec3 autumn = mix(vec3(0.30, 0.09, 0.012), vec3(0.45, 0.22, 0.02), variation);
-	vec3 winter = vec3(0.08, 0.06, 0.03);
-	if (s < 1.0) return mix(spring, summer_col, s);
-	if (s < 2.0) return mix(summer_col, autumn, smoothstep(1.5, 2.0, s) * (0.6 + 0.4 * variation));
-	if (s < 3.0) return mix(autumn, winter, smoothstep(2.4, 3.0, s));
-	return mix(winter, spring, smoothstep(3.6, 4.0, s));
-}
-
 // how far autumn colours have progressed (0 = green .. 1 = full autumn), and how bare the crowns are in winter
 float autumn_amount() {
 	float s = mod(season, 4.0);

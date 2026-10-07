@@ -148,8 +148,16 @@ public static class MapGen
                     StampSegment(poly[s], poly[s + 1], band, riverDist, W, H);
         }
 
+        float hillAmp = feat.Hills switch
+        {
+            Hilliness.Flat => 1.6f, Hilliness.SmallHills => 4f, Hilliness.LargeHills => 8f, Hilliness.Mountainous => 12f, _ => 16f,
+        };
+        // the rolling relief before water shapes it (also used to find natural basins for ponds)
+        float Rolling(float x, float y) => (noise.Fbm(x * 0.008f, y * 0.008f, 5) * 0.5f + 0.5f) * hillAmp;
+
         // ponds and small lakes: fresh still water, more of them on wet tiles; one is guaranteed near the landing
-        // site when no river or sea is close, so colonists always have something to drink
+        // site when no river or sea is close, so colonists always have something to drink. Ponds lie in the low
+        // ground of the rolling relief (natural basins), so their shores stay gentle instead of being dug as craters.
         var pond = new float[W * H];
         Array.Fill(pond, 9f);
         {
@@ -159,13 +167,22 @@ public static class MapGen
             {
                 bool guaranteed = !waterNear && k == count;
                 float r = guaranteed ? rng.Range(5f, 8f) : rng.Range(3.5f, 11f + size * 0.01f);
-                Vector2 pc;
-                if (guaranteed)
+                // a few candidate spots; keep the lowest one
+                Vector2 pc = default; float best = float.MaxValue;
+                for (int c = 0; c < 8; c++)
                 {
-                    float ang = rng.Range(0f, MathF.Tau);
-                    pc = center + new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * rng.Range(24f, 34f);
+                    Vector2 cand;
+                    if (guaranteed)
+                    {
+                        float ang = rng.Range(0f, MathF.Tau);
+                        cand = center + new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * rng.Range(24f, 34f);
+                    }
+                    else cand = new Vector2(rng.Range(r + 4, W - r - 4), rng.Range(r + 4, H - r - 4));
+                    float lowness = Rolling(cand.X, cand.Y);
+                    if (lowness < best) { best = lowness; pc = cand; }
                 }
-                else pc = new Vector2(rng.Range(r + 4, W - r - 4), rng.Range(r + 4, H - r - 4));
+                // ponds need low ground; on a ridge there is no pond (the guaranteed one always stays)
+                if (!guaranteed && best > MathF.Max(1.2f, hillAmp * 0.3f)) continue;
                 if (!guaranteed && Vector2.Distance(pc, center) < r + 22f) continue;
                 int x0 = Math.Max(0, (int)(pc.X - r * 1.6f)), x1 = Math.Min(W - 1, (int)(pc.X + r * 1.6f));
                 int y0 = Math.Max(0, (int)(pc.Y - r * 1.6f)), y1 = Math.Min(H - 1, (int)(pc.Y + r * 1.6f));
@@ -181,10 +198,6 @@ public static class MapGen
         }
 
         // ---- relief
-        float hillAmp = feat.Hills switch
-        {
-            Hilliness.Flat => 1.6f, Hilliness.SmallHills => 4f, Hilliness.LargeHills => 8f, Hilliness.Mountainous => 12f, _ => 16f,
-        };
         // share of the map covered by granite massifs
         float rockCoverage = feat.Hills switch
         {
@@ -218,12 +231,17 @@ public static class MapGen
             {
                 int cx = Math.Min(x, W - 1), cy = Math.Min(y, H - 1);
                 int i = cy * W + cx;
-                float hills = (noise.Fbm(x * 0.008f, y * 0.008f, 5) * 0.5f + 0.5f) * hillAmp
-                              + noise2.Fbm(x * 0.05f, y * 0.05f, 3) * 0.35f;
-                // valleys toward water: rise smoothly away from river and coast
-                float wd = MathF.Min(MathF.Min(riverDist[i] - riverHalfWidth, -seaDepth[i]), (pond[i] - 1f) * 10f);
+                float hills = Rolling(x, y) + noise2.Fbm(x * 0.05f, y * 0.05f, 3) * 0.35f;
+                // valleys toward rivers and the coast: rise smoothly away from them
+                float wd = MathF.Min(riverDist[i] - riverHalfWidth, -seaDepth[i]);
                 float valley = SmoothStep(0f, 60f, wd);
                 float h = 0.45f + hills * valley + MathF.Max(0f, rockField[i] - rockThreshold) * 6f;
+                // ponds: a gentle beach blending into the surrounding ground within about one radius of the shore
+                if (pond[i] < 2.2f)
+                {
+                    float beach = 0.05f + MathF.Max(0f, pond[i] - 1f) * 0.6f;
+                    h = beach + (h - beach) * SmoothStep(1f, 2.2f, pond[i]);
+                }
                 // river bed and sea floor below the water surface
                 if (riverDist[i] < riverHalfWidth)
                 {
@@ -233,7 +251,6 @@ public static class MapGen
                 }
                 else if (riverDist[i] < riverHalfWidth + 3f) h = MathF.Min(h, 0.05f + (riverDist[i] - riverHalfWidth) * 0.15f);
                 if (pond[i] < 1f) h = MathF.Min(h, 0.05f - (1f - pond[i]) * 1.8f);
-                else if (pond[i] < 1.35f) h = MathF.Min(h, 0.05f + (pond[i] - 1f) * 1.2f);
                 if (seaDepth[i] > -6f)
                 {
                     float sd = seaDepth[i];
@@ -263,7 +280,7 @@ public static class MapGen
                     float wet = feat.Soil + soilNoise.Get(x * 0.02f + 50f, y * 0.02f) * 0.3f;
                     if (sd > -3.5f + sn * 2f) t = Terrain.Sand;
                     else if (rd < riverHalfWidth + 1.5f + sn * 1.5f) t = sn > 0.1f ? Terrain.Gravel : Terrain.Mud;
-                    else if (pond[i] < 1.12f + sn * 0.1f) t = Terrain.Mud;
+                    else if (pond[i] < 1.05f + sn * 0.05f) t = Terrain.Mud;
                     else if (pond[i] < 1.5f && wet > 0.6f && sn < 0f) t = Terrain.Marsh;
                     else if (rd < riverHalfWidth + 9f && wet > 0.75f && sn < -0.25f) t = Terrain.Marsh;
                     else if (sn > 0.38f) t = Terrain.Gravel;

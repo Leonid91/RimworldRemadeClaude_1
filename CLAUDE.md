@@ -56,6 +56,13 @@ game/shaders             world_common.gdshaderinc (globals), terrain, rock, wate
   every random property is hashed from the WORLD cell (never from the window slot, or the field re-shuffles = shimmer).
 - PawnModel joints: +X rotation swings a hanging limb forward (−Z); knees bend with −X, elbows with +X. Held bow is
   oriented from the body yaw (not the arm chain).
+- Arrows are 3D (`Sim/Ballistics.cs`): sim space (x east, y south, z up), m and m/tick; launch solved for gravity,
+  wind drift, collisions sampled every 6 cm against ground/water/walls/rock/trunks/crowns and body volumes (colonist
+  cylinder, deer capsule + neck + head + legs); impact point → body part; stuck arrows are Items with StuckZ/StuckDir
+  or StuckArrow entries on creatures. Previews (aim arc) never draw from the sim RNG. Godot ↔ sim: (x, y, z) ↔ (x, z, y).
+- Globe overlays: a tile-id cubemap (map style only) + a per-tile RGF texture (value, water); relief icons are a
+  MultiMesh of quads (`ReliefIcons` atlas).
+- First person (GameView.FirstPerson): camera at the controlled colonist's eyes, mouse captured, model hidden.
 - Planet water: `Planet.Water[t]` (None/Ocean/Lake); lakes = small enclosed water bodies (Biome.Lake), estuaries are
   land river tiles (`Estuary[t]`) draining to the sea. Coast = next to ocean, LakeShore = next to a lake.
 - Map mutations go through LocalMap setters (they record CellChange); GameSim applies them to the path grid each tick
@@ -72,7 +79,8 @@ game/shaders             world_common.gdshaderinc (globals), terrain, rock, wate
 - AutoPilot `--auto="cmd=arg; ..."`: wait, waitfor=game|globe|planet|menu, click=Text (click==Exact), key=action,
   hold=action,s, shot=name, select_tile=start|N, overlay=…, mapsize=N, pawn=i, control=i, speed=N, tab=…, layer=…,
   walkto=item:bow|door|deer|outside|x,y, interact[=label], deer_near=dist, aimshoot=n, hour=H, world, cam=dist[,yaw],
-  camfind=water|rock|tree|bush|cabin, expect=bow|arrows|meat|deerdead|dooropen, log=…, quit.
+  camfind=water|rock|tree|bush|cabin, expect=bow|bowaway|shirtoff|shirton|arrows|meat|deerdead|dooropen, hover=start|lake|ocean|N,
+  hovertext=…, inv=putaway|equip:id|takeoff:id|wear:id, aim=on|off, fpv=on|off, look=deer|yaw,pitch, log=…, quit.
   Any ERROR logged during a run fails it. Screenshots go to `screenshots/`.
 - `tools/integration.sh [quick]`: build → unit tests (gate) → part 1 → game scenarios (ui_flow, goal, saveload,
   perf_1000, perf_1500, visuals, rain, snow, fog); report in `test-results/`, screenshots per scenario.

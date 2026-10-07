@@ -14,8 +14,6 @@ public enum SkillId : byte
     Count,
 }
 
-public enum Passion : byte { None, Minor, Major }
-
 public enum ControlMode : byte { Autonomous, Drafted, Direct }
 
 /// <summary>Visible pose for the renderer.</summary>
@@ -36,17 +34,20 @@ public sealed class TraitDef
     public (Stat stat, float factor)[] Effects = Array.Empty<(Stat, float)>();
     public string[] Conflicts = Array.Empty<string>();
 
-    /// <summary>One line per effect, e.g. "Move speed +15 %" (shown in tooltips).</summary>
-    public string EffectsText()
+    /// <summary>One line per effect, e.g. "Move speed +15 %", and whether it helps the colonist (green) or not (red).</summary>
+    public List<(string text, bool good)> EffectLines()
     {
-        var lines = new List<string>();
+        var lines = new List<(string, bool)>();
         foreach (var (stat, f) in Effects)
         {
             int pct = (int)MathF.Round((f - 1f) * 100f);
-            lines.Add($"{Stats.Label(stat)} {(pct >= 0 ? "+" : "−")}{Math.Abs(pct)} %{Stats.Hint(stat, f)}");
+            lines.Add(($"{Stats.Label(stat)} {(pct >= 0 ? "+" : "−")}{Math.Abs(pct)} %{Stats.Hint(stat, f)}", (f > 1f) == Stats.HigherIsBetter(stat)));
         }
-        return string.Join("\n", lines);
+        return lines;
     }
+
+    /// <summary>The effect lines as plain text.</summary>
+    public string EffectsText() => string.Join("\n", EffectLines().ConvertAll(l => l.text));
 }
 
 public static class Stats
@@ -65,6 +66,14 @@ public static class Stats
         Stat.ThirstRate => "Thirst rate",
         Stat.FatigueRate => "Tiredness rate",
         Stat.CarryCapacity => "Carrying capacity",
+        _ => throw new ArgumentOutOfRangeException(nameof(s), s, null),
+    };
+
+    /// <summary>True when a larger value of the stat is good for the colonist.</summary>
+    public static bool HigherIsBetter(Stat s) => s switch
+    {
+        Stat.MoveSpeed or Stat.WorkSpeed or Stat.GatherSpeed or Stat.MeleeDamage or Stat.MeleeHitChance or Stat.CarryCapacity => true,
+        Stat.ShotSpread or Stat.AimTime or Stat.DamageTaken or Stat.HungerRate or Stat.ThirstRate or Stat.FatigueRate => false,
         _ => throw new ArgumentOutOfRangeException(nameof(s), s, null),
     };
 
@@ -155,7 +164,6 @@ public sealed class Pawn
     public byte HairStyle;
     public readonly List<TraitDef> Traits = new();
     public readonly byte[] Skills = new byte[(int)SkillId.Count];
-    public readonly Passion[] Passions = new Passion[(int)SkillId.Count];
     public readonly Health Health = new(BodyDef.Human);
     public readonly Needs Needs = new();
 
@@ -165,6 +173,8 @@ public sealed class Pawn
     public Item Held;
     /// <summary>The colonist's inventory; its size follows how much this colonist can carry (see CreateInventory).</summary>
     public InventoryGrid Inventory { get; private set; }
+    /// <summary>Arrows stuck in the colonist (in its own frame).</summary>
+    public readonly List<Remade.Sim.StuckArrow> Embedded = new();
 
     // world state
     public Vector2 Position;

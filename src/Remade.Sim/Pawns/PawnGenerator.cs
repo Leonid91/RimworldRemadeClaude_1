@@ -83,8 +83,6 @@ public static class PawnGenerator
             if (s == special2) v += rng.Range(3f, 8f);
             if (rng.Chance(0.12f)) v = rng.Range(0f, 1.5f); // a few untouched skills
             p.Skills[s] = (byte)Math.Clamp((int)v, 0, 20);
-            float pr = rng.NextFloat();
-            p.Passions[s] = p.Skills[s] >= 6 && pr < 0.18f ? Passion.Major : p.Skills[s] >= 3 && pr < 0.4f ? Passion.Minor : Passion.None;
         }
     }
 

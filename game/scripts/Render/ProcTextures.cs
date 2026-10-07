@@ -9,15 +9,13 @@ namespace Remade.Game.Render;
 
 /// <summary>
 /// Procedurally painted, seamlessly tiling textures generated at startup: the shared RGBA noise texture (terrain,
-/// grass, water), an oak leaf-cluster card, bark, and a granite detail map.
+/// grass, water, rock, bark) and an oak leaf-cluster card.
 /// </summary>
 public static class ProcTextures
 {
-    static ImageTexture _leaves, _bark, _granite;
+    static ImageTexture _leaves;
 
     public static ImageTexture Leaves => _leaves ??= BuildLeaves();
-    public static ImageTexture Bark => _bark ??= BuildBark();
-    public static ImageTexture Granite => _granite ??= BuildGranite();
     static ImageTexture _noise;
     /// <summary>RGBA seamless noise (first prototype): R fbm, G cellular distance, B fine value noise, A low-frequency fbm.</summary>
     public static ImageTexture Noise => _noise ??= BuildNoise(1234);
@@ -52,53 +50,6 @@ public static class ProcTextures
         Invariant.Check(d.Length == s * s, $"noise channel has {d.Length} bytes, expected {s * s}");
         return d;
     }
-
-    // ---------------------------------------------------------------- tileable noise
-
-    /// <summary>Periodic value noise (period p cells) so textures tile without seams.</summary>
-    static float PNoise(float x, float y, int p, int seed)
-    {
-        int x0 = (int)MathF.Floor(x), y0 = (int)MathF.Floor(y);
-        float fx = x - x0, fy = y - y0;
-        fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
-        float H(int ix, int iy) => Hash.Cell01(((ix % p) + p) % p, ((iy % p) + p) % p, seed);
-        float a = H(x0, y0), b = H(x0 + 1, y0), c = H(x0, y0 + 1), d = H(x0 + 1, y0 + 1);
-        return (a + (b - a) * fx) + ((c + (d - c) * fx) - (a + (b - a) * fx)) * fy;
-    }
-
-    static float PFbm(float u, float v, int basePeriod, int octaves, int seed)
-    {
-        float s = 0, amp = 0.5f, norm = 0;
-        int p = basePeriod;
-        for (int o = 0; o < octaves; o++)
-        {
-            s += PNoise(u * p, v * p, p, seed + o * 31) * amp;
-            norm += amp;
-            amp *= 0.5f;
-            p *= 2;
-        }
-        return s / norm;
-    }
-
-    /// <summary>Periodic Worley (cellular) distance: pebbles and stones.</summary>
-    static float PWorley(float u, float v, int p, int seed, out float cellHash)
-    {
-        float x = u * p, y = v * p;
-        int cx = (int)MathF.Floor(x), cy = (int)MathF.Floor(y);
-        float best = 9f; cellHash = 0;
-        for (int dy = -1; dy <= 1; dy++)
-            for (int dx = -1; dx <= 1; dx++)
-            {
-                int ix = cx + dx, iy = cy + dy;
-                int wx = ((ix % p) + p) % p, wy = ((iy % p) + p) % p;
-                float px = ix + Hash.Cell01(wx, wy, seed), py = iy + Hash.Cell01(wx, wy, seed + 1);
-                float d = (px - x) * (px - x) + (py - y) * (py - y);
-                if (d < best) { best = d; cellHash = Hash.Cell01(wx, wy, seed + 2); }
-            }
-        return MathF.Sqrt(best);
-    }
-
-    static Color Lerp(Color a, Color b, float t) => a.Lerp(b, Math.Clamp(t, 0f, 1f));
 
     // ---------------------------------------------------------------- foliage
 
@@ -210,57 +161,5 @@ public static class ProcTextures
             img.GenerateMipmaps();
             return ImageTexture.CreateFromImage(img);
         }
-    }
-
-    static ImageTexture BuildBark()
-    {
-        const int S = 256;
-        var data = new byte[S * S * 4];
-        Parallel.For(0, S, y =>
-        {
-            for (int x = 0; x < S; x++)
-            {
-                float u = x / (float)S, v = y / (float)S;
-                // vertical furrows typical of oak bark
-                float f = PFbm(u * 1f, v * 0.25f, 8, 4, 501);
-                float ridges = MathF.Abs(MathF.Sin((u * 10f + f * 2.2f) * MathF.PI));
-                float n = PFbm(u, v, 16, 3, 503);
-                var c = new Color(0.30f, 0.25f, 0.20f).Lerp(new Color(0.12f, 0.10f, 0.08f), (1 - ridges) * 0.8f + n * 0.2f);
-                if (n > 0.7f) c = c.Lerp(new Color(0.30f, 0.36f, 0.20f), (n - 0.7f) * 2f); // lichen
-                int i = (y * S + x) * 4;
-                data[i] = (byte)(c.R * 255); data[i + 1] = (byte)(c.G * 255); data[i + 2] = (byte)(c.B * 255); data[i + 3] = (byte)(ridges * 255);
-            }
-        });
-        var img = Image.CreateFromData(S, S, false, Image.Format.Rgba8, data);
-        img.GenerateMipmaps();
-        return ImageTexture.CreateFromImage(img);
-    }
-
-    /// <summary>Granite detail: rgb albedo (speckled pink/grey/black crystals), alpha = crack/cavity mask.</summary>
-    static ImageTexture BuildGranite()
-    {
-        const int S = 512;
-        var data = new byte[S * S * 4];
-        Parallel.For(0, S, y =>
-        {
-            for (int x = 0; x < S; x++)
-            {
-                float u = x / (float)S, v = y / (float)S;
-                float n = PFbm(u, v, 4, 5, 701);
-                float grain = PNoise(u * 160, v * 160, 160, 703);
-                float grain2 = PNoise(u * 90, v * 90, 90, 705);
-                var c = new Color(0.56f, 0.52f, 0.50f).Lerp(new Color(0.44f, 0.41f, 0.40f), n);
-                if (grain > 0.78f) c = c.Lerp(new Color(0.78f, 0.64f, 0.60f), 0.7f);
-                if (grain2 < 0.16f) c = c.Lerp(new Color(0.10f, 0.10f, 0.11f), 0.75f);
-                if (grain < 0.08f) c = c.Lerp(new Color(0.88f, 0.87f, 0.84f), 0.6f);
-                float d = PWorley(u, v, 6, 707, out _);
-                float crack = Math.Clamp((d - 0.62f) * 8f, 0f, 1f);
-                int i = (y * S + x) * 4;
-                data[i] = (byte)(c.R * 255); data[i + 1] = (byte)(c.G * 255); data[i + 2] = (byte)(c.B * 255); data[i + 3] = (byte)((1 - crack) * 255);
-            }
-        });
-        var img = Image.CreateFromData(S, S, false, Image.Format.Rgba8, data);
-        img.GenerateMipmaps();
-        return ImageTexture.CreateFromImage(img);
     }
 }

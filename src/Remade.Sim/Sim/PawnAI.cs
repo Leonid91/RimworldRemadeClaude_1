@@ -71,7 +71,12 @@ public sealed partial class GameSim
         {
             p.Facing = MathF.Atan2(p.AimDir.Y, p.AimDir.X);
             if (move == Vector2.Zero) p.Anim = PawnAnim.Aim;
-            if (inp.Fire && p.WeaponCooldown == 0) Attack(p, p.AimDir, moving: move != Vector2.Zero);
+            if (inp.Fire && p.WeaponCooldown == 0 && Vector2.DistanceSquared(inp.AimPoint, p.Position) > 1e-4f)
+            {
+                // aim at the 3D point under the cursor (a body, or the ground); without a height, at chest height
+                float z = float.IsNaN(inp.AimZ) ? GroundZ(inp.AimPoint) + 1.0f : inp.AimZ;
+                Attack(p, new Vector3(inp.AimPoint, z), moving: move != Vector2.Zero);
+            }
         }
         else if (inp.Fire)
         {
@@ -615,6 +620,54 @@ public sealed partial class GameSim
     {
         if (!g.FindSpot(it.Def, out int x, out int y, out bool rot)) return false;
         g.Place(it, x, y, rot);
+        return true;
+    }
+
+    /// <summary>
+    /// Takes off a worn garment into the inventory: at the given grid spot (drag and drop) or, with x &lt; 0, at the
+    /// first free spot. Returns false (and tells the player) when it does not fit.
+    /// </summary>
+    public bool TakeOff(Pawn p, Item worn, int x = -1, int y = -1, bool rotated = false)
+    {
+        Invariant.Check(p.Apparel.Contains(worn), $"{p.Name} is not wearing {worn}");
+        if (x < 0 && !p.Inventory.FindSpot(worn.Def, out x, out y, out rotated))
+        {
+            Message($"{p.Name} has no room in the inventory for the {worn.Def.Label}.", p.Position);
+            return false;
+        }
+        var e = new GridEntry { Item = worn, X = x, Y = y, Rotated = rotated };
+        if (!p.Inventory.Fits(x, y, e.W, e.H)) return false;
+        p.Apparel.Remove(worn);
+        p.Inventory.Place(worn, x, y, rotated);
+        Log.Info($"{p.Name} took off {worn} into the inventory at {x},{y}");
+        return true;
+    }
+
+    /// <summary>Takes off a worn garment and drops it on the ground.</summary>
+    public void TakeOffAndDrop(Pawn p, Item worn)
+    {
+        bool removed = p.Apparel.Remove(worn);
+        Invariant.Check(removed, $"{p.Name} is not wearing {worn}");
+        PlaceOnGround(worn, p.Position + new Vector2(MathF.Cos(p.Facing), MathF.Sin(p.Facing)) * 0.6f);
+        Events.Add(new SimEvent(SimEventKind.ItemDropped, worn.Position, null, worn.Id));
+        Log.Info($"{p.Name} took off and dropped {worn}");
+    }
+
+    /// <summary>Puts on a garment from the inventory (or the hands). Refuses, with a message, when a worn item covers the same layer and body part.</summary>
+    public bool WearFromInventory(Pawn p, Item it)
+    {
+        if (it.Def.Kind != ThingKind.Apparel) throw new ArgumentException($"{it} is not apparel");
+        var clash = p.WearConflicts(it.Def);
+        if (clash.Count > 0)
+        {
+            Message($"{p.Name} must take off the {string.Join(", ", clash.ConvertAll(c => c.Def.Label))} first.", p.Position);
+            return false;
+        }
+        bool removed = p.Inventory.Remove(it);
+        if (!removed && p.Held == it) { p.Held = null; removed = true; }
+        Invariant.Check(removed, $"{p.Name} does not carry {it}");
+        p.Wear(it);
+        Log.Info($"{p.Name} put on {it}");
         return true;
     }
 

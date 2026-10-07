@@ -44,7 +44,32 @@ public partial class GameView : Node3D
     int _lastCursorCell = -1;
     /// <summary>Automation can drive the mouse position without moving the OS cursor.</summary>
     public Vector2? MouseOverride;
-    Vector2 MousePos => MouseOverride ?? GetViewport().GetMousePosition();
+    Vector2 MousePos => MouseOverride ?? (FirstPerson ? GetViewport().GetVisibleRect().Size * 0.5f : GetViewport().GetMousePosition());
+
+    /// <summary>Looking through the eyes of the colonist under direct control (Tab).</summary>
+    public bool FirstPerson { get; private set; }
+    float _fpYaw, _fpPitch;
+    public const float MouseLookSensitivity = 0.0035f;
+
+    /// <summary>Turns the first-person view (autopilot): yaw is the map angle (0 east, π/2 south), pitch up.</summary>
+    public void Look(float yaw, float pitch) { _fpYaw = yaw; _fpPitch = pitch; }
+    public float LookYaw => _fpYaw;
+
+    public void SetFirstPerson(bool on)
+    {
+        var controlled = Sim.Controlled;
+        if (on && controlled == null) throw new InvalidOperationException("first-person view needs a colonist under direct control");
+        if (on == FirstPerson) return;
+        FirstPerson = on;
+        if (on) { _fpYaw = controlled.Facing; _fpPitch = -0.08f; }
+        _cam.SetFirstPerson(on);
+        _entities.HiddenPawnId = on ? controlled.Id : -1;
+        _entities.ImpactOnly = on;
+        Input.MouseMode = on ? Input.MouseModeEnum.Captured : Input.MouseModeEnum.Visible;
+        Hud.SetCrosshair(on, false);
+        Log.Action(on ? $"first-person view through {controlled.Name}'s eyes" : "back to the overhead view");
+        if (on) Hud.Message($"First-person view: move the mouse to look, {Settings.KeyName("move_up")}{Settings.KeyName("move_left")}{Settings.KeyName("move_down")}{Settings.KeyName("move_right")} to walk, hold right mouse to draw the bow, left click to shoot. {Settings.KeyName("first_person")} or Esc to go back.", UiKit.Accent);
+    }
 
     public GameView(GameSim sim)
     {
@@ -128,6 +153,7 @@ public partial class GameView : Node3D
         _aiming = false;
         Sim.Input.Aim = false;
         Sim.Input.Move = SV2.Zero;
+        if (p.Mode != ControlMode.Direct && FirstPerson) SetFirstPerson(false);
         if (p.Mode == ControlMode.Direct)
         {
             _cam.Follow = true;
@@ -155,23 +181,35 @@ public partial class GameView : Node3D
         }
 
         if (!_worldVisible) return;
-        if (controlled != null) { _cam.Follow = _cam.Follow || controlled == SelectedPawn; _cam.FollowTarget = _entities.PawnVisualPos(controlled); }
-        else UpdateCameraKeys(dt);
-        _cam.UpdateRig(dt);
+        if (FirstPerson && (controlled == null || controlled.Dead)) SetFirstPerson(false);
+        Rect2 rect;
+        if (FirstPerson)
+        {
+            var vp = _entities.PawnVisualPos(controlled);
+            var eye = vp + new Vector3(Mathf.Cos(_fpYaw), 0, Mathf.Sin(_fpYaw)) * 0.12f + Vector3.Up * GameSim.BodyHeight(controlled) * 0.9f;
+            _cam.PlaceFirstPerson(eye, _fpYaw, _fpPitch);
+            rect = new Rect2(vp.X - 120, vp.Z - 120, 240, 240);
+        }
+        else
+        {
+            if (controlled != null) { _cam.Follow = _cam.Follow || controlled == SelectedPawn; _cam.FollowTarget = _entities.PawnVisualPos(controlled); }
+            else UpdateCameraKeys(dt);
+            _cam.UpdateRig(dt);
+            rect = _cam.VisibleRect(GetViewport().GetVisibleRect().Size);
+        }
         var focus = _cam.Focus;
         Sim.Focus = new SV2(focus.X, focus.Z);
-        var vpSize = GetViewport().GetVisibleRect().Size;
-        var rect = _cam.VisibleRect(vpSize);
         _map.UpdateStreaming(rect, _frame);
         _flora.UpdateStreaming(rect, _frame);
-        _flora.UpdateGrass(focus, _cam.Distance);
-        _map.SetCameraDistance(_cam.Distance);
+        float viewDist = FirstPerson ? 30f : _cam.Distance;
+        _flora.UpdateGrass(focus, viewDist);
+        _map.SetCameraDistance(viewDist);
         _map.AnimateDoors(dt);
-        _light.Update(dt, focus, _cam.Distance);
+        _light.Update(dt, focus, viewDist);
         _weather.Update(focus);
         _audio.Update(dt, focus, _cam.Camera.GlobalPosition, _light.Daylight);
         // canopy reveal around the controlled (or selected) colonist
-        var reveal = controlled ?? SelectedPawn;
+        var reveal = FirstPerson ? null : controlled ?? SelectedPawn;
         if (reveal != null)
         {
             var rp = _entities.PawnVisualPos(reveal);
@@ -182,6 +220,7 @@ public partial class GameView : Node3D
         _entities.ShowAim = controlled != null && _aiming;
         _entities.CamDistance = _cam.Distance;
         _entities.AimRange = controlled != null ? GameSim.AttackRange(controlled) : 0;
+        _entities.AimTarget = new System.Numerics.Vector3(Sim.Input.AimPoint, float.IsNaN(Sim.Input.AimZ) ? 0f : Sim.Input.AimZ);
         _entities.Update(dt);
         UpdateHudOverlays(controlled);
         Perf(delta);
@@ -255,7 +294,15 @@ public partial class GameView : Node3D
         }
         // analog-capable (gamepad sticks, automation); keyboard gives the usual 8 directions
         var v = Input.GetVector("move_left", "move_right", "move_up", "move_down");
-        var md = v == Vector2.Zero ? Vector2.Zero : _cam.ScreenToMapDir(v.Normalized());
+        Vector2 md;
+        if (FirstPerson)
+        {
+            // relative to where the colonist looks
+            var fwd = new Vector2(Mathf.Cos(_fpYaw), Mathf.Sin(_fpYaw));
+            var right = new Vector2(-fwd.Y, fwd.X);
+            md = v == Vector2.Zero ? Vector2.Zero : (fwd * -v.Y + right * v.X).Normalized();
+        }
+        else md = v == Vector2.Zero ? Vector2.Zero : _cam.ScreenToMapDir(v.Normalized());
         inp.Move = new SV2(md.X, md.Y);
         inp.Sprint = Input.IsActionPressed("sprint");
         // the button state is resynchronised every frame: a release that landed on a HUD control (or happened while
@@ -264,8 +311,20 @@ public partial class GameView : Node3D
         // holding the right button past a short click = aiming
         if (_rmbDown && !_aiming && Time.GetTicksMsec() / 1000.0 - _rmbTime > 0.18) _aiming = true;
         inp.Aim = _aiming;
-        var gp = _cam.GroundPoint(MousePos);
-        if (gp.HasValue) inp.AimPoint = new SV2(gp.Value.X, gp.Value.Z);
+        if (AimTargetAt(MousePos, controlled, out var aim))
+        {
+            inp.AimPoint = new SV2(aim.X, aim.Y);
+            inp.AimZ = aim.Z;
+        }
+        else if (FirstPerson)
+        {
+            // looking at the sky: aim far along the view
+            var look = new System.Numerics.Vector3(Mathf.Cos(_fpYaw) * Mathf.Cos(_fpPitch), Mathf.Sin(_fpYaw) * Mathf.Cos(_fpPitch), Mathf.Sin(_fpPitch));
+            var far = Sim.EyePoint(controlled) + look * 120f;
+            inp.AimPoint = new SV2(far.X, far.Y);
+            inp.AimZ = far.Z;
+        }
+        if (FirstPerson) Hud.SetCrosshair(true, _aiming);
 
         // interactions in reach
         _nearby = Interactions.Nearby(Sim, controlled);
@@ -284,13 +343,16 @@ public partial class GameView : Node3D
             if (e.IsActionPressed("world") || e.IsActionPressed("menu")) { Hud.ToggleWorld(); GetViewport().SetInputAsHandled(); }
             return;
         }
+        if (FirstPerson && e.IsActionPressed("menu")) { SetFirstPerson(false); Handled(); return; }
         if (e.IsActionPressed("menu")) { Hud.TogglePause(); Handled(); return; }
         if (Hud.PauseMenu != null) return;
-        if (e.IsActionPressed("world")) { Hud.ToggleWorld(); Handled(); return; }
+        if (e.IsActionPressed("world")) { if (FirstPerson) SetFirstPerson(false); Hud.ToggleWorld(); Handled(); return; }
         var controlled = Sim.Controlled;
 
         if (e is InputEventKey { Pressed: true, Echo: false })
         {
+            // with a colonist under direct control the first-person key wins over "next colonist" (same key by default)
+            if (controlled != null && e.IsActionPressed("first_person")) { SetFirstPerson(!FirstPerson); Handled(); return; }
             if (e.IsActionPressed("pause")) { Hud.SetSpeed(Sim.SpeedIndex == 0 ? _lastSpeed : 0); if (Sim.SpeedIndex != 0) _lastSpeed = Sim.SpeedIndex; Handled(); return; }
             for (int s = 1; s <= 4; s++) if (e.IsActionPressed("speed_" + s)) { Hud.SetSpeed(s); _lastSpeed = s; Handled(); return; }
             if (e.IsActionPressed("interact")) { Interact(controlled); Handled(); return; }
@@ -333,6 +395,13 @@ public partial class GameView : Node3D
                 return;
             }
         }
+        if (e is InputEventMouseMotion look && FirstPerson)
+        {
+            _fpYaw += look.Relative.X * MouseLookSensitivity;
+            _fpPitch = Mathf.Clamp(_fpPitch - look.Relative.Y * MouseLookSensitivity, -1.35f, 1.35f);
+            Handled();
+            return;
+        }
         if (e is InputEventMouseMotion mm)
         {
             if ((mm.ButtonMask & MouseButtonMask.Middle) != 0)
@@ -373,6 +442,26 @@ public partial class GameView : Node3D
             var door = opts.Find(o => o.Kind is InteractionKind.OpenDoor or InteractionKind.CloseDoor);
             if (door != null) Interactions.Execute(Sim, SelectedPawn, door);
         }
+    }
+
+    /// <summary>
+    /// The 3D point (sim space: x, y on the map, z up) under a screen position: the body of a creature if the ray meets
+    /// one before the ground, else the ground itself.
+    /// </summary>
+    bool AimTargetAt(Vector2 screen, Pawn shooter, out System.Numerics.Vector3 target)
+    {
+        var cam = _cam.Camera;
+        var o = cam.ProjectRayOrigin(screen);
+        var d = cam.ProjectRayNormal(screen);
+        var so = new System.Numerics.Vector3(o.X, o.Z, o.Y);
+        var sd = new System.Numerics.Vector3(d.X, d.Z, d.Y);
+        float groundT = float.MaxValue;
+        var gp = _cam.GroundPoint(screen);
+        if (gp.HasValue) groundT = (gp.Value - o).Length();
+        if (Sim.RaycastCreature(so, sd, Math.Min(groundT, 400f), shooter, out var hit)) { target = hit; return true; }
+        if (gp.HasValue) { target = new System.Numerics.Vector3(gp.Value.X, gp.Value.Z, gp.Value.Y); return true; }
+        target = default;
+        return false;
     }
 
     int CursorCell()
@@ -431,8 +520,10 @@ public partial class GameView : Node3D
             var aimAt = new SV2(Sim.Input.AimPoint.X, Sim.Input.AimPoint.Y);
             float dist = SV2.Distance(controlled.Position, aimAt);
             float range = GameSim.AttackRange(controlled);
-            string weapon = controlled.HasRangedWeapon && controlled.Arrows > 0 ? $"{controlled.Arrows} arrows" : "melee";
-            Hud.ShowAim(true, mouse, $"{dist:F1} m / {range:F0} m  ·  {weapon}{(dist > range ? "  ·  out of range" : "")}");
+            bool bow = controlled.HasRangedWeapon && controlled.Arrows > 0;
+            string weapon = bow ? $"{controlled.Arrows} arrows" : "melee";
+            string blocked = bow && _entities.AimBlocked ? "  ·  blocked" : "";
+            Hud.ShowAim(true, mouse, $"{dist:F1} m / {range:F0} m  ·  {weapon}{(dist > range ? "  ·  beyond effective range" : "")}{blocked}");
         }
         else Hud.ShowAim(false, mouse, null);
 
@@ -440,9 +531,10 @@ public partial class GameView : Node3D
         if (cell != _lastCursorCell)
         {
             _lastCursorCell = cell;
-            Hud.ShowHover(cell >= 0 ? DescribeCell(cell) : "", mouse);
+            Hud.SetReadout(cell >= 0 ? DescribeCell(cell) : "");
         }
-        else Hud.ShowHover(null, mouse);
+        var gp = _cam.GroundPoint(mouse);
+        _map.SetGrid(Settings.GridMode, gp.HasValue ? new Vector2(gp.Value.X, gp.Value.Z) : new Vector2(-1000, -1000));
     }
 
     string DescribeCell(int cell)

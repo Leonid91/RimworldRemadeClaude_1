@@ -90,11 +90,23 @@ public sealed partial class GameSim
         foreach (var p in colonists) maxId = Math.Max(maxId, MaxIdOf(p));
         sim._nextId = maxId + 1;
 
-        // colonists around the landing spot
+        // colonists around the landing spot, always on ground connected to the cabin (water can cut the landing spot
+        // off: then the nearest connected ground is used)
+        int doorOutside = -1;
+        sim.Map.XY(gen.CabinDoor, out int dx0, out int dy0);
+        for (int dy = -1; dy <= 1 && doorOutside < 0; dy++)
+            for (int dx = -1; dx <= 1 && doorOutside < 0; dx++)
+            {
+                int x = dx0 + dx, y = dy0 + dy;
+                if ((dx == 0) == (dy == 0) || !sim.Map.InBounds(x, y)) continue;
+                int c = sim.Map.Index(x, y);
+                if (sim.Paths.Cost[c] != 0 && !gen.CabinInterior.Contains(c)) doorOutside = c;
+            }
+        Invariant.Check(doorOutside >= 0, $"the cabin door at cell {gen.CabinDoor} has no walkable outside");
         for (int i = 0; i < colonists.Count; i++)
         {
             var p = colonists[i];
-            Vector2 spot = sim.FindStandableNear(gen.LandingSpot + new Vector2((i - colonists.Count / 2f) * 1.6f, 1.5f), 6);
+            Vector2 spot = sim.ConnectedSpotNear(gen.LandingSpot + new Vector2((i - colonists.Count / 2f) * 1.6f, 1.5f), doorOutside, 60);
             p.Position = spot;
             p.Facing = MathF.PI * 0.5f;
             p.Mode = ControlMode.Autonomous;
@@ -159,6 +171,27 @@ public sealed partial class GameSim
     }
 
     /// <summary>Nearest standable cell centre to a point, searching outward up to a radius.</summary>
+    /// <summary>
+    /// The nearest dry, open spot to <paramref name="p"/> from which <paramref name="connectedTo"/> can be walked to
+    /// (searched ring by ring up to the radius). A map without one is a generation bug.
+    /// </summary>
+    public Vector2 ConnectedSpotNear(Vector2 p, int connectedTo, int radius)
+    {
+        int cx = (int)p.X, cy = (int)p.Y;
+        for (int r = 0; r <= radius; r++)
+            for (int dy = -r; dy <= r; dy++)
+                for (int dx = -r; dx <= r; dx++)
+                {
+                    if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r) continue;
+                    int x = cx + dx, y = cy + dy;
+                    if (!Map.InBounds(x, y)) continue;
+                    int c = Map.Index(x, y);
+                    if (Map.Blocked(c) || Map.TerrainAt(c).Water || Map.Plants[c] == Plant.Oak || !Paths.Reachable(c, connectedTo)) continue;
+                    return r == 0 ? p : LocalMap.CellCenter(x, y);
+                }
+        throw new InvalidOperationException($"no ground within {radius} of {p} is connected to cell {connectedTo}");
+    }
+
     public Vector2 FindStandableNear(Vector2 p, int radius)
         => TryFindStandableNear(p, radius, out var s) ? s : throw new InvalidOperationException($"No standable cell within {radius} of {p}");
 
@@ -197,11 +230,17 @@ public sealed partial class GameSim
         return first;
     }
 
-    public void PlaceOnGround(Item it, Vector2 pos)
+    /// <summary>
+    /// Puts an item on the ground, lying flat. Items landing on a blocked or deep-water cell are moved to the nearest
+    /// open spot, except <paramref name="exact"/> placements (an arrow stuck in a trunk or a wall stays where it is).
+    /// </summary>
+    public void PlaceOnGround(Item it, Vector2 pos, bool exact = false)
     {
         Invariant.Check(!it.Spawned, $"{it} is already on the ground");
+        it.StuckZ = float.NaN;
         int cell = Map.CellAt(pos);
-        if (cell < 0 || Map.Blocked(cell) || Map.TerrainAt(cell).Deep)
+        Invariant.Check(!exact || cell >= 0, $"exact placement of {it} outside the map at {pos}");
+        if (!exact && (cell < 0 || Map.Blocked(cell) || Map.TerrainAt(cell).Deep))
         {
             pos = FindStandableNear(new Vector2(Math.Clamp(pos.X, 1, Map.Width - 2), Math.Clamp(pos.Y, 1, Map.Height - 2)), 8);
             cell = Map.CellAt(pos);

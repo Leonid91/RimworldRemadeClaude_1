@@ -10,42 +10,63 @@ namespace Remade.Sim;
 public sealed partial class GameSim
 {
     public const float FistReach = 1.4f, FistDamage = 6f;
-    public const float ArrowSpeed = 34f / 60f; // cells per tick (≈ 34 m/s at 1x)
 
     /// <summary>Range of the pawn's current attack: the bow's range with arrows, else melee reach.</summary>
     public static float AttackRange(Pawn p) => p.HasRangedWeapon && p.Arrows > 0 ? p.Held.Def.Range : FistReach;
 
-    /// <summary>Angular spread (radians, 1 sigma) of a shot: better shooters are steadier; moving makes it worse.</summary>
+    /// <summary>
+    /// Angular spread (radians, 1 sigma) of a shot, left/right (up/down is 0.7 of it): a novice (skill 0) 3.2°, a
+    /// master (20) 0.6°; moving adds 2.5°. At 10 m a novice puts most arrows within half a metre of the aim point.
+    /// </summary>
     public static float ShotSpread(Pawn p, bool moving)
     {
-        float deg = 6.5f - p.Skills[(int)SkillId.Shooting] * 0.24f;
+        float deg = 3.2f - p.Skills[(int)SkillId.Shooting] * 0.13f;
         deg *= p.StatFactor(Stat.ShotSpread);
-        if (moving) deg += 3f;
-        return MathF.Max(0.6f, deg) * MathF.PI / 180f;
+        if (moving) deg += 2.5f;
+        return MathF.Max(0.5f, deg) * MathF.PI / 180f;
     }
 
-    /// <summary>Shoots (bow with arrows) or swings (otherwise) in a direction.</summary>
+    /// <summary>Shoots or swings toward a direction on the ground (aims at chest height 10 m away).</summary>
     public void Attack(Pawn p, Vector2 dir, bool moving, bool forceMelee = false)
     {
         if (dir.LengthSquared() < 1e-6f) throw new ArgumentException("attack direction is zero");
+        var to = p.Position + Vector2.Normalize(dir) * 10f;
+        Attack(p, new Vector3(to, GroundZ(to) + 1.0f), moving, forceMelee);
+    }
+
+    /// <summary>
+    /// Shoots (bow with arrows) at a 3D point (x, y on the map, z height in metres), or swings (otherwise) toward it.
+    /// The arrow is launched on the arc that reaches the point, with a random error from skill, traits and moving.
+    /// </summary>
+    public void Attack(Pawn p, Vector3 target, bool moving, bool forceMelee = false)
+    {
+        var dir = new Vector2(target.X, target.Y) - p.Position;
+        if (dir.LengthSquared() < 1e-6f) throw new ArgumentException("attack target is at the attacker's position");
         dir = Vector2.Normalize(dir);
+        p.Facing = MathF.Atan2(dir.Y, dir.X);
         if (!forceMelee && p.HasRangedWeapon && p.Arrows > 0)
         {
             int used = p.ConsumeFromInventory(Defs.Arrow, 1);
             Invariant.Check(used == 1, $"{p.Name}: arrow count {p.Arrows} but none consumed");
             float spread = ShotSpread(p, moving);
-            float angle = MathF.Atan2(dir.Y, dir.X) + Rng.Gaussian() * spread;
-            var d = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
-            float range = p.Held.Def.Range;
+            var from = LaunchPoint(p);
+            var v = LaunchVelocity(from, target);
+            // aiming error: a random turn left/right and up/down
+            float yaw = Rng.Gaussian() * spread, pitch = Rng.Gaussian() * spread * 0.7f;
+            float hx = v.X, hy = v.Y, hl = MathF.Sqrt(hx * hx + hy * hy);
+            float cy = MathF.Cos(yaw), sy = MathF.Sin(yaw);
+            float nx = hx * cy - hy * sy, ny = hx * sy + hy * cy;
+            float elev = MathF.Atan2(v.Z, hl) + pitch;
+            var dirH = new Vector2(nx, ny) / MathF.Max(hl, 1e-6f);
+            var vel = new Vector3(dirH * MathF.Cos(elev), MathF.Sin(elev)) * ArrowSpeed;
             Projectiles.Add(new Projectile
             {
-                Start = p.Position + d * 0.45f, Pos = p.Position + d * 0.45f, Dir = d, Speed = ArrowSpeed,
-                MaxDist = range * Rng.Range(1.0f, 1.12f), Damage = p.Held.Def.Damage * Rng.Range(0.85f, 1.25f), Shooter = p,
+                Start = from, Pos = from, Vel = vel, Damage = p.Held.Def.Damage * Rng.Range(0.85f, 1.25f), Shooter = p,
             });
             p.WeaponCooldown = (int)(p.Held.Def.Cooldown * p.StatFactor(Stat.AimTime));
             p.Anim = PawnAnim.Shoot; p.AnimTime = 0;
             Events.Add(new SimEvent(SimEventKind.ArrowFired, p.Position, null, p.Id));
-            Log.Debug($"{p.Name} shoots: aim {MathF.Atan2(dir.Y, dir.X) * 57.3f:F0}° actual {angle * 57.3f:F0}° spread {spread * 57.3f:F1}°, arrows left {p.Arrows}");
+            Log.Debug($"{p.Name} shoots at {target}: elevation {MathF.Atan2(v.Z, hl) * 57.3f:F1}°, error {yaw * 57.3f:F1}°/{pitch * 57.3f:F1}°, arrows left {p.Arrows}");
             return;
         }
 
@@ -87,11 +108,14 @@ public sealed partial class GameSim
         Events.Add(new SimEvent(SimEventKind.MeleeHit, targetPos, null, bestP?.Id ?? bestA.Id));
     }
 
-    /// <summary>Wounds a colonist (arrow or blow). Damage is scaled by their Damage taken stat (Tough, Delicate).</summary>
-    void HitPawn(Pawn victim, float damage, Pawn attacker, float bleed, string what)
+    /// <summary>
+    /// Wounds a colonist (arrow or blow) in a given body part, or a random one (part &lt; 0). Damage is scaled by their
+    /// Damage taken stat (Tough, Delicate).
+    /// </summary>
+    void HitPawn(Pawn victim, float damage, Pawn attacker, float bleed, string what, int part = -1)
     {
         damage *= victim.StatFactor(Stat.DamageTaken);
-        int part = victim.Health.Body.PickHitPart(ref Rng);
+        if (part < 0) part = victim.Health.Body.PickHitPart(ref Rng);
         string partName = victim.Health.Body[part].Name.ToLowerInvariant();
         bool died = victim.Health.Damage(part, damage, Tick, bleed);
         string by = attacker != null ? $"{attacker.Name}'s {what}" : $"A {what}";
@@ -100,114 +124,19 @@ public sealed partial class GameSim
         if (died) Die(victim);
     }
 
-    void TickProjectiles()
-    {
-        for (int i = Projectiles.Count - 1; i >= 0; i--)
-        {
-            var pr = Projectiles[i];
-            StepProjectile(pr);
-            if (pr.Done) Projectiles.RemoveAt(i);
-        }
-    }
-
-    void StepProjectile(Projectile pr)
-    {
-        float step = MathF.Min(pr.Speed, pr.MaxDist - pr.Traveled);
-        Vector2 a = pr.Pos, b = pr.Pos + pr.Dir * step;
-
-        // creatures along the segment (closest first)
-        Animal hit = null; float hitT = float.MaxValue;
-        foreach (var an in Animals)
-        {
-            if (an.Dead) continue;
-            float t = SegmentCircle(a, b, an.Position, Animal.Radius * an.Size);
-            if (t >= 0 && t < hitT) { hitT = t; hit = an; }
-        }
-        Pawn hitPawn = null;
-        foreach (var o in Pawns)
-        {
-            if (o.Dead || o == pr.Shooter) continue;
-            float t = SegmentCircle(a, b, o.Position, Pawn.Radius + 0.05f);
-            if (t >= 0 && t < hitT) { hitT = t; hitPawn = o; hit = null; }
-        }
-        // solid cells and tree trunks along the segment
-        float blockT = float.MaxValue; bool tree = false;
-        int samples = Math.Max(1, (int)MathF.Ceiling(step / 0.25f));
-        for (int s = 1; s <= samples; s++)
-        {
-            float t = s / (float)samples;
-            int cell = Map.CellAt(Vector2.Lerp(a, b, t));
-            if (cell < 0) { blockT = t; break; }
-            if (Map.BlocksProjectiles(cell)) { blockT = t; break; }
-            if (Map.Plants[cell] == Plant.Oak && Vector2.Distance(Vector2.Lerp(a, b, t), Map.CellCenter(cell)) < TrunkRadius(cell) + 0.05f
-                && pr.Traveled > 1.5f && Rng.Chance(0.5f)) { blockT = t; tree = true; break; }
-        }
-
-        if (hitPawn != null && hitT * step <= blockT * step)
-        {
-            pr.Done = true;
-            Vector2 at = Vector2.Lerp(a, b, hitT);
-            Events.Add(new SimEvent(SimEventKind.ArrowHit, at, null, hitPawn.Id));
-            HitPawn(hitPawn, pr.Damage, pr.Shooter, bleed: 2.2f, "arrow");
-            return;
-        }
-        if (hit != null && hitT * step <= blockT * step)
-        {
-            pr.Done = true;
-            Vector2 at = Vector2.Lerp(a, b, hitT);
-            hit.EmbeddedArrows++;
-            Events.Add(new SimEvent(SimEventKind.ArrowHit, at, null, hit.Id));
-            HitAnimal(hit, pr.Damage, pr.Start, bleed: 2.2f);
-            return;
-        }
-        if (blockT <= 1f)
-        {
-            pr.Done = true;
-            Vector2 at = Vector2.Lerp(a, b, MathF.Max(0f, blockT - 0.3f / MathF.Max(step, 0.01f)));
-            Events.Add(new SimEvent(SimEventKind.ArrowMissed, at, tree ? "tree" : "wall"));
-            if (Rng.Chance(0.6f)) DropArrow(at);
-            return;
-        }
-        pr.Pos = b;
-        pr.Traveled += step;
-        if (pr.Traveled >= pr.MaxDist - 1e-4f)
-        {
-            pr.Done = true;
-            Events.Add(new SimEvent(SimEventKind.ArrowMissed, b, "ground"));
-            // arrows landing near animals spook them
-            foreach (var an in Animals) if (!an.Dead && Vector2.Distance(an.Position, b) < 6f) Spook(an, pr.Start);
-            int cell = Map.CellAt(b);
-            if (cell >= 0 && !Map.TerrainAt(cell).Water && Rng.Chance(0.75f)) DropArrow(b);
-        }
-    }
-
     void DropArrow(Vector2 at)
     {
         int cell = Map.CellAt(at);
         if (cell < 0 || Map.TerrainAt(cell).Water) return;
         // merge with an arrow stack already lying there
         foreach (var it in ItemsAt(cell))
-            if (it.Def == Defs.Arrow && it.Count < Defs.Arrow.StackLimit) { it.Count++; return; }
+            if (it.Def == Defs.Arrow && !it.Stuck && it.Count < Defs.Arrow.StackLimit) { it.Count++; return; }
         SpawnItem(Defs.Arrow, 1, at);
     }
 
-    /// <summary>Returns the segment parameter t∈[0,1] of the first intersection with a circle, or -1.</summary>
-    static float SegmentCircle(Vector2 a, Vector2 b, Vector2 c, float r)
+    void HitAnimal(Animal a, float damage, Vector2 from, float bleed, int part = -1)
     {
-        Vector2 d = b - a, f = a - c;
-        float A = Vector2.Dot(d, d);
-        if (A < 1e-9f) return f.LengthSquared() <= r * r ? 0f : -1f;
-        float B = 2 * Vector2.Dot(f, d), C = Vector2.Dot(f, f) - r * r;
-        if (C <= 0) return 0f;
-        float disc = B * B - 4 * A * C;
-        if (disc < 0) return -1f;
-        float t = (-B - MathF.Sqrt(disc)) / (2 * A);
-        return t >= 0 && t <= 1 ? t : -1f;
-    }
-
-    void HitAnimal(Animal a, float damage, Vector2 from, float bleed)
-    {
-        int part = a.Health.Body.PickHitPart(ref Rng);
+        if (part < 0) part = a.Health.Body.PickHitPart(ref Rng);
         string partName = a.Health.Body[part].Name;
         bool died = a.Health.Damage(part, damage, Tick, bleed);
         Log.Info($"{a} hit in the {partName} for {damage:F1} (condition {a.Health.Condition(part):P0}, blood loss {a.Health.BloodLoss:P0}){(died ? " — killed: " + a.Health.DeathCause : "")}");
@@ -224,8 +153,10 @@ public sealed partial class GameSim
         // butchered on the spot: a deer yields 15–25 kg of venison (0.5 kg per unit)
         int meat = (int)(Rng.Range(30, 46) * a.Size);
         SpawnItem(Defs.Venison, meat, a.Position);
+        // the arrows stuck in it can be pulled out; some broke
         int arrows = 0;
-        for (int i = 0; i < a.EmbeddedArrows; i++) if (Rng.Chance(0.5f)) arrows++;
+        for (int i = 0; i < a.Embedded.Count; i++) if (Rng.Chance(0.6f)) arrows++;
+        a.Embedded.Clear();
         if (arrows > 0) SpawnItem(Defs.Arrow, arrows, a.Position + new Vector2(0.4f, 0.2f));
         Events.Add(new SimEvent(SimEventKind.AnimalKilled, a.Position, $"{a.Label} killed — {meat * Defs.Venison.Mass:F1} kg of venison", a.Id));
         Log.Info($"{a} died ({a.Health.DeathCause}) at {a.Position}: dropped {meat} venison, {arrows} arrows recovered");
@@ -267,21 +198,9 @@ public sealed partial class GameSim
         p.Anim = PawnAnim.Aim;
         if (j.Stage == 0) { j.Stage = 1; j.Timer = 0; }
         if (++j.Timer < (ranged ? (int)(45 * p.StatFactor(Stat.AimTime)) : 10) || p.WeaponCooldown > 0) return;
-        // lead the target a little
+        // lead the target a little and aim at the middle of its body
         Vector2 lead = ranged ? target.Position + target.Velocity * (dist / ArrowSpeed) * 0.8f : target.Position;
-        Attack(p, lead - p.Position, moving: false, forceMelee: !ranged);
+        Attack(p, new Vector3(lead, GroundZ(lead) + 1.0f * target.Size), moving: false, forceMelee: !ranged);
         j.Timer = 0;
-    }
-
-    public bool LineOfSight(Vector2 a, Vector2 b)
-    {
-        float len = Vector2.Distance(a, b);
-        int n = Math.Max(1, (int)(len / 0.4f));
-        for (int i = 1; i < n; i++)
-        {
-            int c = Map.CellAt(Vector2.Lerp(a, b, i / (float)n));
-            if (c < 0 || Map.BlocksProjectiles(c)) return false;
-        }
-        return true;
     }
 }

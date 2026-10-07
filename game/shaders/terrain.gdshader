@@ -1,6 +1,8 @@
-// Ground (look of the first prototype, RimworldTest): procedural colours per terrain type from one RGBA noise
-// texture, an organic blend between the four nearest cells (noise-wobbled), a smooth grass-cover tint, caustics
-// under water, puddles after rain, snow, drifting cloud shadows. Colours are authored in sRGB.
+// Ground: procedural colours per terrain type from one RGBA noise texture, an organic blend between the four nearest
+// cells (noise-wobbled), a smooth grass-cover tint, caustics under water, puddles after rain, snow, drifting cloud
+// shadows. The palette is painted in the manner of old isometric strategy games (8th Wonder of the World): lush
+// saturated meadows with lighter brushed patches, warm reddish dirt with pebbles, gravel as small rounded cobbles.
+// Colours are authored in sRGB.
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 
@@ -8,6 +10,8 @@ render_mode diffuse_burley, specular_schlick_ggx;
 
 uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
 uniform float far_view = 0.0; // 1 when zoomed out beyond the grass blades: the meadow tint carries the colour
+uniform int grid_mode = 0;    // cell grid: 0 off, 1 everywhere, 2 around the cursor
+uniform vec2 cursor_pos = vec2(-1000.0);
 
 varying vec3 wpos;
 varying vec3 wnrm;
@@ -38,14 +42,15 @@ vec3 stone_col(vec3 w, vec4 nm, vec4 nd) {
 // 7 river shallow, 8 river deep, 9 ocean shallow, 10 ocean deep, 11 lake shallow, 12 lake deep.
 vec3 terrain_col(int t, vec2 p, vec4 nm, vec4 nd, vec4 nd2, out float rough, out float poros) {
 	rough = 0.92; poros = 1.0;
-	if (t == 0 || t == 1) { // soil / rich soil
+	if (t == 0 || t == 1) { // soil / rich soil: warm reddish browns, dark crumbs, pale pebbles
 		float rich = float(t == 1);
-		vec3 a = mix(vec3(0.34, 0.25, 0.16), vec3(0.19, 0.14, 0.09), rich);
-		vec3 b = mix(vec3(0.44, 0.34, 0.22), vec3(0.27, 0.19, 0.12), rich);
+		vec3 a = mix(vec3(0.43, 0.27, 0.15), vec3(0.27, 0.16, 0.09), rich);
+		vec3 b = mix(vec3(0.56, 0.37, 0.21), vec3(0.37, 0.23, 0.13), rich);
 		vec3 c = mix(a, b, nm.r);
-		c *= 0.82 + 0.34 * nd.b * nd2.r;
-		float peb = smoothstep(0.14, 0.06, nd.g) * step(0.68, nd2.a);
-		c = mix(c, c * 1.35 + vec3(0.03), peb * (1.0 - rich) * 0.5);
+		c *= 0.84 + 0.3 * nd.b * nd2.r;
+		c *= 1.0 - 0.28 * smoothstep(0.72, 0.92, nd.b) * nd2.g;
+		float peb = smoothstep(0.16, 0.05, nd.g) * step(0.6, nd2.a);
+		c = mix(c, vec3(0.72, 0.64, 0.52) * (0.85 + 0.3 * nd.r), peb * (1.0 - rich * 0.6) * 0.75);
 		return c;
 	}
 	if (t == 3 || t == 9) { // sand, sandy sea bed
@@ -55,13 +60,14 @@ vec3 terrain_col(int t, vec2 p, vec4 nm, vec4 nd, vec4 nd2, out float rough, out
 		rough = 0.95; poros = 0.8;
 		return c;
 	}
-	if (t == 2) { // gravel
-		vec3 c = mix(vec3(0.40, 0.37, 0.33), vec3(0.52, 0.49, 0.45), nm.r);
-		float stone = smoothstep(0.30, 0.1, nd.g) * smoothstep(0.25, 0.6, nd2.r + nd.a * 0.4);
-		vec3 sc = c * mix(1.02, 1.28, nd.a) * mix(vec3(1.0), vec3(1.05, 1.0, 0.94), nd2.b);
-		c = mix(c * 0.82, sc, stone * 0.85);
-		c *= 0.88 + 0.24 * nd2.b;
-		rough = 0.85; poros = 0.6;
+	if (t == 2) { // gravel: small rounded cobbles, lit on top, dark gaps between them
+		vec4 cb = texture(noise_tex, p * 0.19);
+		float body = (1.0 - smoothstep(0.42, 0.6, cb.g)) * smoothstep(0.2, 0.5, nd2.r + 0.25);
+		vec3 stone = mix(vec3(0.47, 0.43, 0.38), vec3(0.60, 0.56, 0.50), cb.b) * mix(vec3(1.0), vec3(1.05, 0.98, 0.9), cb.r);
+		stone *= 0.8 + 0.35 * (1.0 - cb.g);           // rounded: brighter in the middle of each stone
+		vec3 earth = mix(vec3(0.34, 0.27, 0.19), vec3(0.42, 0.34, 0.24), nm.r);
+		vec3 c = mix(earth, stone, body * 0.9);
+		rough = 0.8; poros = 0.5;
 		return c;
 	}
 	if (t == 4 || t == 5) { // mud, marsh
@@ -121,10 +127,15 @@ void fragment() {
 	float g = mix(mix(d00.g, d10.g, fl.x), mix(d01.g, d11.g, fl.x), fl.y);
 	float s4 = mod(season, 4.0);
 	float season_dry = smoothstep(1.4, 2.0, s4) * (1.0 - smoothstep(3.4, 3.9, s4)) * 0.6;
-	float gm = g * (0.55 + 0.45 * smoothstep(0.3, 0.7, nd2.r));
-	vec3 gcol = mix(vec3(0.17, 0.25, 0.07), vec3(0.32, 0.38, 0.13), nm.a);
-	gcol = mix(gcol, vec3(0.45, 0.38, 0.18), season_dry);
-	col = mix(col, gcol * (0.85 + 0.3 * nd.b), clamp(gm * 0.85, 0.0, 0.85));
+	float gm = sqrt(g) * (0.6 + 0.4 * smoothstep(0.3, 0.7, nd2.r));
+	// lush, saturated meadow with lighter brushed patches and darker tufts
+	vec3 gcol = mix(vec3(0.20, 0.40, 0.08), vec3(0.38, 0.58, 0.13), nm.a);
+	float patch_ = smoothstep(0.55, 0.75, texture(noise_tex, pr * 0.012 + 0.5).r);
+	gcol = mix(gcol, vec3(0.54, 0.68, 0.20), patch_ * 0.55);
+	float stroke = texture(noise_tex, vec2(p.x * 0.6, p.y * 0.18) + nm.rg).b;
+	gcol *= 0.86 + 0.28 * stroke;
+	gcol = mix(gcol, vec3(0.55, 0.47, 0.22), season_dry);
+	col = mix(col, gcol * (0.88 + 0.24 * nd.b), clamp(gm * 0.95, 0.0, 0.92));
 
 	// under water: darker, cooler + caustics
 	float uw = smoothstep(-0.08, -0.55, wpos.y);
@@ -139,14 +150,14 @@ void fragment() {
 
 	// snow (not under water)
 	float sn = snow_cover * smoothstep(0.25, 0.75, nm.r * 0.6 + nd.b * 0.4 + snow_cover * 0.5) * smoothstep(0.55, 0.85, wnrm.y) * (1.0 - uw);
-	vec3 snc = vec3(0.8, 0.83, 0.89) * (0.92 + 0.12 * nd.r);
+	vec3 snc = vec3(0.88, 0.9, 0.95) * (0.92 + 0.12 * nd.r);
 	col = mix(col, snc, sn);
 	rough = mix(rough, 0.55, sn);
 	poros = mix(poros, 0.0, sn);
 
 	// zoomed far out the grass blades are gone: let the meadow tint carry the colour
 	if (far_view > 0.0) {
-		col = mix(col, mix(vec3(0.24, 0.33, 0.10), vec3(0.36, 0.42, 0.16), nm.a) * (1.0 - sn) + snc * sn, g * far_view * 0.55 * (1.0 - uw));
+		col = mix(col, mix(vec3(0.24, 0.42, 0.10), vec3(0.40, 0.58, 0.15), nm.a) * (1.0 - sn) + snc * sn, g * far_view * 0.6 * (1.0 - uw));
 	}
 
 	// wet ground: darker and glossier; puddles collect in low noise basins on bare, flat ground
@@ -158,6 +169,15 @@ void fragment() {
 	rough = mix(rough, 0.05, puddle);
 
 	col *= cloud_shadow(p) * 0.6 + 0.4;
+	if (grid_mode != 0) {
+		// thin anti-aliased lines on the cell borders; around the cursor they fade out within 6 m
+		vec2 fc = fract(p);
+		vec2 w = fwidth(p) * 1.2;
+		vec2 l = 1.0 - smoothstep(vec2(0.0), w, min(fc, 1.0 - fc));
+		float line = max(l.x, l.y);
+		if (grid_mode == 2) line *= 1.0 - smoothstep(3.5, 6.0, distance(p, cursor_pos));
+		col = mix(col, col * 0.45 + vec3(0.05), line * 0.7);
+	}
 	ALBEDO = pow(max(col, vec3(0.0)), vec3(2.2));
 	ROUGHNESS = rough;
 	SPECULAR = 0.35 + puddle * 0.4;
