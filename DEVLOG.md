@@ -265,3 +265,9 @@ Changed:
 
 Changed:
 * PLAY.md says Godot must be installed, with the official website
+
+## October 7th, 2026 - Launch-only README - Commit 12
+
+Changed:
+* README holds only how to install Godot and launch the game (Windows, then macOS); PLAY.md merged into it
+* The player guide moved to docs/GUIDE.md

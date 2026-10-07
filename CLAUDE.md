@@ -1,7 +1,7 @@
 # CLAUDE.md: RimworldRemadeClaude_1
 
 RimWorld-like colony sim, 2.5D (overhead 3D), Godot 4.7.2 .NET (C#), Forward+. Everything (meshes, textures, sounds,
-UI) is generated in code. Requirements: `docs/SPEC_RimworldLike1.txt`. Player docs: `README.md`. Change log: `DEVLOG.md`.
+UI) is generated in code. Requirements: `docs/SPEC_RimworldLike1.txt`. Launch instructions only: `README.md` (keep it that way). Player guide: `docs/GUIDE.md`. Change log: `DEVLOG.md`.
 
 ## Rules from the spec (do not drop)
 - Every change = one DEVLOG entry ("Month DDth, YYYY - Title (≤5 words) - Commit N", Added / Changed / Bug fixed with a
