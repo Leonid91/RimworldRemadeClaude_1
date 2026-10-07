@@ -581,3 +581,42 @@ public class DirectControlTests
         Assert.True(p.Position.X < 10f, $"stuck at {p.Position}");
     }
 }
+
+public class ClockTests
+{
+    [Fact]
+    public void ColonyCannotStartBeforeThePlanetsCurrentTime()
+    {
+        var planet = new Planet(new WorldParams { Seed = 2, Frequency = 16 });
+        planet.Climate.Update(GameTime.TicksPerDay * 3);
+        int id = 1;
+        var pawns = PawnGenerator.GenerateGroup(1, 1, () => id++);
+        int tile = Enumerable.Range(0, planet.TileCount).First(t => planet.Biomes[t] == Biome.TemperateForest);
+        Assert.Throws<ArgumentException>(() => GameSim.NewColony(planet, tile, 64, pawns, 1, GameTime.TicksPerHour));
+    }
+}
+
+public class MiningTests
+{
+    [Fact]
+    public void MiningRemovesGraniteAndOpensThePath()
+    {
+        var planet = new Planet(new WorldParams { Seed = 1, Frequency = 16 });
+        var map = new LocalMap(20, 20, 0, 1);
+        for (int y = 0; y < 20; y++) { map.Buildings[map.Index(10, y)] = Building.Granite; map.BuildingHp[map.Index(10, y)] = 1500; map.Terrain[map.Index(10, y)] = Terrain.RoughGranite; }
+        var sim = new GameSim(planet, map, 1);
+        int id = 1;
+        var p = PawnGenerator.GenerateGroup(1, 3, () => id++)[0];
+        p.Position = new Vector2(8.5f, 10.5f);
+        sim.Pawns.Add(p);
+        sim.SetMode(p, ControlMode.Drafted);
+        Assert.False(sim.Paths.Reachable(map.Index(2, 2), map.Index(18, 2)));
+        var mine = Interactions.ForCell(sim, p, map.Index(10, 10)).Single(i => i.Kind == InteractionKind.Mine);
+        Interactions.Execute(sim, p, mine);
+        for (int t = 0; t < 2000 && map.Buildings[map.Index(10, 10)] == Building.Granite; t++) sim.Step();
+        Assert.Equal(Building.None, map.Buildings[map.Index(10, 10)]);
+        Assert.Equal(Terrain.RoughGranite, map.Terrain[map.Index(10, 10)]);
+        Assert.True(sim.Paths.Reachable(map.Index(2, 2), map.Index(18, 2)));
+        Assert.Null(p.Job);
+    }
+}

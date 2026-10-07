@@ -45,6 +45,7 @@ public partial class PlanetView : SubViewportContainer
     bool _dragging;
     Vector2 _dragStart, _lastMouse;
     float _time;
+    float _cloudOpacity = 0.85f;
     readonly int _bakeSize;
 
     public PlanetView(int bakeSize = 768)
@@ -150,6 +151,9 @@ public partial class PlanetView : SubViewportContainer
         if (Ready3D)
         {
             _cloudMat.SetShaderParameter("time_offset", _time * 0.012f);
+            // clouds fade away while a data overlay is shown, so the data is readable
+            _cloudOpacity = Mathf.MoveToward(_cloudOpacity, _overlay == PlanetBaker.OverlayKind.None ? 0.85f : 0.08f, (float)delta * 2f);
+            _cloudMat.SetShaderParameter("opacity", _cloudOpacity);
             if (Mode == CameraMode.MenuLimb) _globeRoot.RotateY((float)delta * 0.012f);
             if (_overlay is PlanetBaker.OverlayKind.Temperature or PlanetBaker.OverlayKind.Precipitation && Planet.Climate.Version != _overlayClimateVersion && _overlayTask == null)
                 StartOverlayBake(_overlay);

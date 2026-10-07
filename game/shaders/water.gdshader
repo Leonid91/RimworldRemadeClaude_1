@@ -45,9 +45,11 @@ void fragment() {
 		vec2 cell = floor(p * 2.0);
 		float h = hash12(cell);
 		float ph = fract(t * 1.3 + h);
-		vec2 c = (cell + 0.5 + (vec2(hash12(cell + 3.1), hash12(cell + 7.7)) - 0.5) * 0.6) / 2.0;
+		vec2 c = (cell + 0.5 + (vec2(hash12(cell + 3.1), hash12(cell + 7.7)) - 0.5) * 0.08) / 2.0;
 		float d = length(p - c);
-		float ring = sin((d - ph * 0.5) * 60.0) * smoothstep(0.25, 0.0, abs(d - ph * 0.5)) * (1.0 - ph);
+		// rings stay inside their own 0.5 m cell (max radius 0.18, centre jitter 0.04) so they never get cut
+		float rr = ph * 0.18;
+		float ring = sin((d - rr) * 70.0) * smoothstep(0.06, 0.0, abs(d - rr)) * (1.0 - ph) * step(d, 0.24);
 		n.xy += normalize(p - c + 1e-4) * ring * 0.25 * clamp(wetness * 1.5, 0.0, 1.0);
 	}
 	NORMAL_MAP = n * 0.5 + 0.5;

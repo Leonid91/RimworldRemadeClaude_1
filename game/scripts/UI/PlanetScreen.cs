@@ -103,9 +103,17 @@ public partial class OverlayBar : VBoxContainer
         Refresh();
     }
 
+    PlanetBaker.OverlayKind _shown = (PlanetBaker.OverlayKind)(-1);
+
+    public override void _Process(double delta)
+    {
+        if (_view.Overlay != _shown) Refresh();
+    }
+
     void Refresh()
     {
         var k = _view.Overlay;
+        _shown = k;
         int idx = (int)k;
         for (int i = 0; i < _buttons.GetChildCount(); i++)
         {
@@ -212,8 +220,8 @@ public partial class PlanetScreen : Control
 
         _sizePanel = UiKit.Panel(null);
         _sizePanel.SetAnchorsPreset(LayoutPreset.BottomRight);
-        _sizePanel.Position = new Vector2(-520, -560);
-        _sizePanel.CustomMinimumSize = new Vector2(480, 0);
+        _sizePanel.Position = new Vector2(-660, -600);
+        _sizePanel.CustomMinimumSize = new Vector2(620, 0);
         _sizePanel.Visible = false;
         AddChild(_sizePanel);
     }
@@ -256,6 +264,8 @@ public partial class PlanetScreen : Control
         {
             var b = new CheckBox { Text = $"{name}   {note}", ButtonGroup = group, ButtonPressed = size == setup.MapSize, FocusMode = FocusModeEnum.None };
             b.AddThemeFontSizeOverride("font_size", 16);
+            b.AddThemeColorOverride("font_pressed_color", UiKit.Accent);
+            b.AddThemeColorOverride("font_hover_pressed_color", UiKit.Accent);
             int s = size;
             b.Toggled += on => { if (on) { setup.MapSize = s; Log.Action($"map size {s}"); } };
             col.AddChild(b);

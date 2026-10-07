@@ -78,7 +78,10 @@ public sealed partial class GameSim
         if (!BiomeInfo.Playable(planet.Biomes[tile]))
             throw new InvalidOperationException($"Tile {tile} ({planet.Biomes[tile]}) is not playable in this version");
         if (colonists == null || colonists.Count == 0) throw new ArgumentException("at least one colonist is required");
-        planet.Climate.Update(Math.Max(planet.Climate.LastUpdateTick, startTick));
+        // the planet and every map on it share one clock
+        if (startTick < planet.Climate.LastUpdateTick)
+            throw new ArgumentException($"Colony start tick {startTick} is before the planet's current time {planet.Climate.LastUpdateTick}");
+        planet.Climate.Update(startTick);
         var gen = MapGen.Generate(planet, tile, mapSize, seed);
         var sim = new GameSim(planet, gen.Map, seed);
         sim.Tick = startTick;

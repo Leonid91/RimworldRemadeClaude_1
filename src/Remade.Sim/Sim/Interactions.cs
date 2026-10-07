@@ -7,7 +7,7 @@ using Remade.Things;
 
 namespace Remade.Sim;
 
-public enum InteractionKind : byte { PickUp, Gather, Drink, OpenDoor, CloseDoor, Hunt, Attack, GoTo, Eat }
+public enum InteractionKind : byte { PickUp, Gather, Drink, OpenDoor, CloseDoor, Hunt, Attack, GoTo, Eat, Mine }
 
 /// <summary>Something a pawn can do with a nearby thing. Shared by the E key, the right-click menu and the AI.</summary>
 public sealed class Interaction
@@ -40,6 +40,7 @@ public static class Interactions
 
         int cx = (int)p.Position.X, cy = (int)p.Position.Y;
         int waterCell = -1; float waterD = float.MaxValue;
+        int rockCell = -1; float rockD = float.MaxValue;
         for (int y = cy - 2; y <= cy + 2; y++)
             for (int x = cx - 2; x <= cx + 2; x++)
             {
@@ -58,9 +59,12 @@ public static class Interactions
                     list.Add(new Interaction { Kind = open ? InteractionKind.CloseDoor : InteractionKind.OpenDoor, Cell = c, Position = cc, Label = open ? "Close door" : "Open door" });
                 }
                 if (map.IsFreshWater(c) && d < waterD) { waterD = d; waterCell = c; }
+                if (map.Buildings[c] == Building.Granite && d < rockD) { rockD = d; rockCell = c; }
             }
         if (waterCell >= 0)
             list.Add(new Interaction { Kind = InteractionKind.Drink, Cell = waterCell, Position = map.CellCenter(waterCell), Label = "Drink water" });
+        if (rockCell >= 0)
+            list.Add(new Interaction { Kind = InteractionKind.Mine, Cell = rockCell, Position = map.CellCenter(rockCell), Label = "Mine granite" });
 
         list.Sort((a, b) => Vector2.DistanceSquared(a.Position, p.Position).CompareTo(Vector2.DistanceSquared(b.Position, p.Position)));
         return list;
@@ -99,6 +103,12 @@ public static class Interactions
             list.Add(new Interaction { Kind = map.DoorOpen[cell] ? InteractionKind.CloseDoor : InteractionKind.OpenDoor, Cell = cell, Position = cc, Label = map.DoorOpen[cell] ? "Close door" : "Open door" });
         if (map.IsFreshWater(cell))
             list.Add(new Interaction { Kind = InteractionKind.Drink, Cell = cell, Position = cc, Label = "Drink water" });
+        if (map.Buildings[cell] == Building.Granite)
+        {
+            var mine = new Interaction { Kind = InteractionKind.Mine, Cell = cell, Position = cc, Label = "Mine granite" };
+            if (sim.InteractionSpot(cell, p.Position) < 0) { mine.Disabled = true; mine.DisabledReason = "no exposed face"; }
+            list.Add(mine);
+        }
         if (sim.Paths.Cost[cell] != 0 && map.Buildings[cell] != Building.Door)
             list.Add(new Interaction { Kind = InteractionKind.GoTo, Cell = cell, Position = cc, Label = "Go here" });
         return list;
@@ -119,6 +129,7 @@ public static class Interactions
             InteractionKind.Attack => new Job { Kind = JobKind.Melee, TargetAnimal = i.Animal, Label = i.Label },
             InteractionKind.GoTo => new Job { Kind = JobKind.Goto, TargetCell = i.Cell, Label = "Going" },
             InteractionKind.Eat => new Job { Kind = JobKind.PickUp, TargetItem = i.Item, Label = i.Label, EatAfter = true },
+            InteractionKind.Mine => new Job { Kind = JobKind.Mine, TargetCell = i.Cell, Label = "Mining granite" },
             _ => throw new ArgumentOutOfRangeException(nameof(i), i.Kind, "unknown interaction"),
         };
         job.Forced = true;

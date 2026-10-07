@@ -100,3 +100,27 @@ Bug fixed
   * Each water cell had its own flow vector, so the scrolling normal maps broke at cell edges; flow is now per shared corner with two-phase flow mapping.
 * The cabin and colonists were hidden under the forest canopy
   * The cabin could be placed inside the forest with only a 2-cell clearing.
+
+## October 6th, 2026 - Mining, tests, atmosphere - Commit 5
+
+Added:
+* Mining: granite can be mined with a right-click order or E in direct control; work time depends on the Mining skill, the cell becomes rough granite floor, paths open up, sometimes a 25 kg granite chunk drops; pick and break sounds
+* Integration tests part 1 (`tests/Remade.Integration`): planets up to 163 842 tiles, a year of climate, maps up to 1500×1500, a full day of simulation with all deer, pathfinding stress, save/load of a 1000×1000 colony with identical continuation, and the goal scenario on a 600×600 map — each with a performance budget, Markdown report in test-results/
+* Integration tests part 2 (`tools/integration.sh`): unit tests as a gate, then the real game driven through its UI and input in scenarios (UI flow with globe overlays and options, goal, mining, save → load, 1000 and 1500 maps with performance readouts, dawn/noon/dusk/night, rain, snow, fog), screenshots per scenario, any logged error fails the run
+* Build, test and run scripts (`tools/build.sh`, `tools/test.sh`, `tools/run.ps1`, `Play.bat`), project notes (CLAUDE.md) and player guide (README.md)
+* Unit tests: mining, shared planet/colony clock
+
+Changed:
+* Twilight and night: blue-violet ambient light and exposure that adapts in the dark, so dawn and dusk are readable
+* Fog is pale and neutral and lighter; the low sun loses its orange in mist and overcast
+* Clouds fade away on the globe while a climate overlay is shown; overlay legends follow the active overlay
+* Map size panel fits the screen; the selected size is highlighted
+* A colony cannot be started before the planet's current time (the planet and its maps share one clock)
+
+Bug fixed
+* Blocky squares on water in the rain
+  * Rain ripples were cut at the edge of their 0.5 m cells.
+* Fog turned the whole scene brown-red at sunrise
+  * The volumetric fog scattered the strongly orange low sun at a too high density.
+* "Mine" was never offered by the E key next to a rock
+  * The reach test for rock faces was stricter than for other interactions.

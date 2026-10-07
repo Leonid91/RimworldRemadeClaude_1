@@ -322,6 +322,17 @@ void fragment() {
                 mat.Roughness = 0.35f;
                 break;
             }
+            case "granite_chunk":
+            {
+                var rng = new Rng(33);
+                b.Color = new Color(0.55f, 0.52f, 0.5f);
+                b.Ellipsoid(new Vector3(0, 0.14f, 0), new Vector3(0.24f, 0.15f, 0.2f), 7, 4);
+                // jag the surface so it reads as broken stone
+                for (int i = 0; i < b.V.Count; i++) b.V[i] = b.V[i] * new Vector3(1 + rng.Range(-0.12f, 0.12f), 1 + rng.Range(-0.15f, 0.1f), 1 + rng.Range(-0.12f, 0.12f));
+                for (int i = 0; i < b.C.Count; i++) b.C[i] = b.C[i] * rng.Range(0.8f, 1.1f);
+                mat.Roughness = 0.9f;
+                break;
+            }
             case "berries":
             {
                 b.Color = new Color(0.22f, 0.35f, 0.12f);

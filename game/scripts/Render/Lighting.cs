@@ -55,7 +55,7 @@ public partial class Lighting : Node3D
         {
             ShadowEnabled = Settings.ShadowQuality > 0, DirectionalShadowMode = DirectionalLight3D.ShadowMode.Parallel4Splits,
             ShadowBlur = 1.2f, LightAngularDistance = 0.6f, ShadowBias = 0.04f, ShadowNormalBias = 1.2f,
-            DirectionalShadowBlendSplits = true, DirectionalShadowFadeStart = 0.85f, LightVolumetricFogEnergy = 1.4f,
+            DirectionalShadowBlendSplits = true, DirectionalShadowFadeStart = 0.85f, LightVolumetricFogEnergy = 0.8f,
         };
         AddChild(_sun);
         _moon = new DirectionalLight3D { ShadowEnabled = Settings.ShadowQuality >= 2, LightColor = new Color(0.55f, 0.65f, 0.95f), LightEnergy = 0.0f, DirectionalShadowMode = DirectionalLight3D.ShadowMode.Parallel2Splits, LightVolumetricFogEnergy = 0.5f };
@@ -124,6 +124,8 @@ public partial class Lighting : Node3D
         float low = 1f - Mathf.SmoothStep(0.0f, 0.45f, elev);
         var sunCol = new Color(1f, 0.97f, 0.92f).Lerp(new Color(1f, 0.55f, 0.28f), low * 0.85f);
         float overcast = Mathf.Clamp((w.Cloud - 0.35f) / 0.65f, 0f, 1f);
+        // mist and overcast scatter the light: the low sun loses its orange in fog
+        sunCol = sunCol.Lerp(new Color(0.92f, 0.92f, 0.9f), Mathf.Clamp(w.Fog * 0.8f + overcast * 0.4f, 0f, 0.85f));
         _sun.LightColor = sunCol;
         _sun.LightEnergy = Mathf.SmoothStep(-0.04f, 0.12f, elev) * (1.9f - overcast * 1.25f - w.Fog * 0.4f);
         _sun.Visible = elev > -0.06f;
@@ -140,17 +142,20 @@ public partial class Lighting : Node3D
         _sky.EnergyMultiplier = 0.35f + Daylight * 0.75f;
         _sky.Turbidity = 8f + overcast * 12f + w.Fog * 8f;
         _sky.MieCoefficient = 0.005f + overcast * 0.03f + w.Fog * 0.02f;
-        _e.AmbientLightEnergy = 0.25f + Daylight * 0.75f - overcast * 0.15f;
-        _e.AmbientLightSkyContribution = 0.85f;
-        _e.AmbientLightColor = new Color(0.10f, 0.13f, 0.22f);
-        _e.TonemapExposure = 1.05f + night * 0.55f;
+        // twilight keeps a soft blue-violet ambient; the eye adapts at night (exposure rises)
+        float twilight = Mathf.SmoothStep(-0.28f, -0.02f, elev) * (1f - Mathf.SmoothStep(0.02f, 0.22f, elev));
+        _e.AmbientLightSkyContribution = 0.65f;
+        _e.AmbientLightColor = new Color(0.13f, 0.16f, 0.27f).Lerp(new Color(0.42f, 0.36f, 0.46f), twilight);
+        _e.AmbientLightEnergy = 0.45f + Daylight * 0.6f + twilight * 0.35f - overcast * 0.12f;
+        _e.TonemapExposure = 1.05f + night * 0.85f + twilight * 0.3f;
 
         // fog: aerial haze, morning mist, rain murk
         float rainMurk = w.Rain * 0.6f + w.Snowfall * 0.8f;
-        _e.FogDensity = 0.0008f + w.Fog * 0.012f + rainMurk * 0.004f;
-        _e.FogLightColor = new Color(0.62f, 0.68f, 0.78f).Lerp(new Color(0.85f, 0.65f, 0.5f), low * Daylight).Lerp(new Color(0.06f, 0.08f, 0.13f), night);
-        _e.FogSunScatter = 0.15f + w.Fog * 0.5f;
-        _e.VolumetricFogDensity = 0.002f + w.Fog * 0.035f + rainMurk * 0.01f;
+        _e.FogDensity = 0.0008f + w.Fog * 0.0055f + rainMurk * 0.0018f;
+        // fog is pale and neutral; only a hint of warmth when the sun is low, dark blue at night
+        _e.FogLightColor = new Color(0.70f, 0.74f, 0.80f).Lerp(new Color(0.86f, 0.78f, 0.70f), low * Daylight * 0.5f).Lerp(new Color(0.10f, 0.12f, 0.18f), night);
+        _e.FogSunScatter = 0.08f + w.Fog * 0.2f;
+        _e.VolumetricFogDensity = 0.0015f + w.Fog * 0.012f + rainMurk * 0.004f;
         _e.VolumetricFogAlbedo = new Color(0.9f, 0.92f, 0.95f);
         _e.FogDepthBegin = 0;
 

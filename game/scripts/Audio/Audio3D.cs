@@ -153,6 +153,8 @@ public partial class Audio3D : Node3D
             case SimEventKind.MeleeHit: Play("thud", at, -2, 0.8f); break;
             case SimEventKind.AnimalFled: Play("hooves", at, -6, _rng.Range(0.9f, 1.1f)); break;
             case SimEventKind.AnimalKilled: Play("thud_soft", at, 0, 0.7f); break;
+            case SimEventKind.MiningHit: Play("tok", at, -3, _rng.Range(0.45f, 0.6f)); break;
+            case SimEventKind.Mined: Play("thud", at, 0, 0.6f); break;
         }
     }
 

@@ -6,7 +6,7 @@ using Remade.Things;
 
 namespace Remade.Pawns
 {
-    public enum JobKind : byte { Wait, Goto, Wander, PickUp, Gather, Drink, ToggleDoor, Eat, Sleep, Hunt, Melee }
+    public enum JobKind : byte { Wait, Goto, Wander, PickUp, Gather, Drink, ToggleDoor, Eat, Sleep, Hunt, Melee, Mine }
 
     /// <summary>What a pawn is doing. Stage 0 = moving to the work spot, stage 1 = working.</summary>
     public sealed class Job
@@ -85,7 +85,7 @@ namespace Remade.Sim
     public enum SimEventKind : byte
     {
         Message, ArrowFired, ArrowHit, ArrowMissed, AnimalKilled, ItemPickedUp, ItemDropped, DoorToggled, Gathered, Drank, Ate,
-        Swing, MeleeHit, AnimalFled, PawnDied, ItemSpawned, ItemDespawned, AnimalDespawned,
+        Swing, MeleeHit, AnimalFled, PawnDied, ItemSpawned, ItemDespawned, AnimalDespawned, MiningHit, Mined,
     }
 
     public struct SimEvent

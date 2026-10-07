@@ -85,6 +85,12 @@ public static class Defs
         Nutrition = 0.03f, Hydration = 0.01f, Color = 0x5B2A7A, Description = "Sweet, dark wild berries.",
     });
 
+    public static readonly ThingDef GraniteChunk = Add(new ThingDef
+    {
+        Id = "granite_chunk", Label = "granite chunk", Kind = ThingKind.Resource, Mass = 25f, StackLimit = 1, GridW = 2, GridH = 2,
+        Color = 0x8A8480, Description = "A heavy block of granite broken off while mining.",
+    });
+
     public static readonly ThingDef TShirt = Add(new ThingDef
     {
         Id = "tshirt", Label = "cotton T-shirt", Kind = ThingKind.Apparel, Mass = 0.2f, GridW = 2, GridH = 2, Color = 0x7C8C70,

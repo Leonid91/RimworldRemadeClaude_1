@@ -7,7 +7,7 @@ uniform samplerCube albedo_map : source_color, filter_linear_mipmap, repeat_disa
 uniform samplerCube normal_map : filter_linear_mipmap, repeat_disable;   // rgb = object normal * 0.5 + 0.5, a = elevation 0..1 (0.5 = sea level)
 uniform samplerCube overlay_map : filter_linear, repeat_disable;         // r = overlay value 0..1
 uniform int overlay_mode = 0;      // 0 none, 1 temperature, 2 elevation, 3 precipitation
-uniform float overlay_strength = 0.85;
+uniform float overlay_strength = 0.92;
 uniform float time_scroll = 0.0;
 uniform int debug_mode = 0; // 1: agreement of baked normal with the geometric normal (white = correct)
 

@@ -210,6 +210,7 @@ public partial class GameView : Node3D
                 case SimEventKind.PawnDied: Hud.Message(e.Text, UiKit.Bad); break;
                 case SimEventKind.ItemPickedUp when e.Text != null: Hud.Message(e.Text); break;
                 case SimEventKind.Gathered: Hud.Message(e.Text); break;
+                case SimEventKind.Mined: Hud.Message("Granite mined."); break;
             }
         }
         Sim.Events.Clear();
@@ -445,7 +446,7 @@ public partial class GameView : Node3D
         foreach (var it in Sim.ItemsAt(cell)) parts.Add(it.Label);
         if (m.Plants[cell] == Plant.Oak) parts.Add("Oak tree");
         if (m.Plants[cell] == Plant.BerryBush) parts.Add($"Berry bush ({m.Berries[cell]} berries)");
-        if (m.Buildings[cell] != Building.None) parts.Add(BuildingInfo.Label(m.Buildings[cell]) + (m.Buildings[cell] == Building.Door ? (m.DoorOpen[cell] ? " (open)" : " (closed)") : ""));
+        if (m.Buildings[cell] != Building.None) parts.Add(BuildingInfo.Label(m.Buildings[cell]) + (m.Buildings[cell] == Building.Door ? (m.DoorOpen[cell] ? " (open)" : " (closed)") : m.Buildings[cell] == Building.Granite ? " (minable)" : ""));
         parts.Add(m.TerrainAt(cell).Label);
         return string.Join("\n", parts);
     }

@@ -349,6 +349,10 @@ public sealed partial class GameSim
                 RunHuntJob(p, j);
                 break;
 
+            case JobKind.Mine:
+                RunMineJob(p, j);
+                break;
+
             default:
                 throw new InvalidOperationException($"Unhandled job kind {j.Kind}");
         }
@@ -481,6 +485,33 @@ public sealed partial class GameSim
                 break;
             }
         }
+    }
+
+    /// <summary>Mining speed in rock hit points per tick: a novice clears a granite cell in ~12 s at 1x, a master in ~4 s.</summary>
+    public static float MiningRate(Pawn p) => 2f + p.Skills[(int)SkillId.Mining] * 0.25f;
+
+    void RunMineJob(Pawn p, Job j)
+    {
+        if (Map.Buildings[j.TargetCell] != Building.Granite) { EndJob(p); return; }
+        Vector2 target = Map.CellCenter(j.TargetCell);
+        if (j.Stage == 0)
+        {
+            int spot = InteractionSpot(j.TargetCell, p.Position);
+            if (spot < 0) { EndJob(p, "cannot reach the rock face."); return; }
+            if (Vector2.Distance(p.Position, target) <= Reach || FollowPathTo(p, spot, out bool failed, 0.3f)) { j.Stage = 1; p.Path.Clear(); p.PathIndex = 0; }
+            else { if (failed) EndJob(p, "cannot reach the rock face."); return; }
+        }
+        Vector2 look = target - p.Position;
+        if (look.LengthSquared() > 1e-4f) p.Facing = MathF.Atan2(look.Y, look.X);
+        p.Anim = PawnAnim.Swing;
+        if (++j.Timer % 45 == 0) { p.AnimTime = 0; Events.Add(new SimEvent(SimEventKind.MiningHit, target, null, j.TargetCell)); }
+        float hp = Map.BuildingHp[j.TargetCell] - MiningRate(p);
+        if (hp > 0) { Map.BuildingHp[j.TargetCell] = (ushort)hp; return; }
+        Map.MineOut(j.TargetCell);
+        Events.Add(new SimEvent(SimEventKind.Mined, target, "granite mined", j.TargetCell));
+        Log.Info($"{p.Name} mined granite at cell {j.TargetCell}");
+        if (Rng.Chance(0.4f)) SpawnItem(Defs.GraniteChunk, 1, target);
+        EndJob(p);
     }
 
     bool DoorOccupied(int cell)

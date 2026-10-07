@@ -33,6 +33,7 @@ public partial class AutoPilot : Node
     double _waitForTimeout;
     readonly List<string> _failures = new();
     readonly List<string> _errors = new();
+    int _graniteAtStart = -1;
     int _shots;
     Func<bool> _activity;     // a multi-frame command in progress (returns true when done)
     double _activityTimeout;
@@ -94,7 +95,7 @@ public partial class AutoPilot : Node
             case "waitfor": _waitFor = arg; _waitForTimeout = 120; break;
             case "shot": Main.I.Screenshot($"{++_shots:00}_{arg}"); break;
             case "log": Log.Info("AutoPilot note: " + arg); break;
-            case "click": ClickButton(arg); _wait = 0.3; break;
+            case "click": ClickButton(arg.StartsWith("=") ? arg[1..] : arg, exact: arg.StartsWith("=")); _wait = 0.3; break;
             case "key": PressAction(arg); _wait = 0.2; break;
             case "hold":
             {
@@ -266,6 +267,20 @@ public partial class AutoPilot : Node
             var a = sim.Animals.Where(x => !x.Dead).OrderBy(x => SV2.Distance(x.Position, p.Position)).First();
             return a.Position;
         }
+        if (what == "rock")
+        {
+            // the nearest exposed granite face: walk to its interaction spot
+            int best = -1; float bestD = float.MaxValue;
+            for (int c = 0; c < sim.Map.CellCount; c++)
+            {
+                if (sim.Map.Buildings[c] != Building.Granite) continue;
+                float d = SV2.DistanceSquared(sim.Map.CellCenter(c), p.Position);
+                if (d < bestD && sim.InteractionSpot(c, p.Position) >= 0) { bestD = d; best = c; }
+            }
+            if (best < 0) throw new InvalidOperationException("no exposed granite on this map");
+            _graniteAtStart = sim.Map.Buildings.Count(b => b == Building.Granite);
+            return sim.Map.CellCenter(sim.InteractionSpot(best, p.Position));
+        }
         if (what == "outside") return sim.FindStandableNear(new SV2(sim.Map.Width / 2f, sim.Map.Height / 2f), 10);
         var parts = what.Split(',');
         return new SV2(F(parts[0]), F(parts[1]));
@@ -285,7 +300,7 @@ public partial class AutoPilot : Node
         path.Add(target);
         Log.Debug($"walkto {what}: from {pawn.Position} to {target}, path {string.Join(" ", path.Select(v => $"({v.X:F1},{v.Y:F1})"))}");
         int idx = 0;
-        float stop = what.StartsWith("item:") ? 0.8f : 0.5f;
+        float stop = what.StartsWith("item:") ? 0.8f : what is "rock" or "door" ? 0.25f : 0.5f;
         SV2 lastPos = pawn.Position; double stuck = 0;
         int replans = 0;
         Begin($"walkto {what}", () =>
@@ -448,6 +463,7 @@ public partial class AutoPilot : Node
             "meat" => p.CountInInventory(Defs.Venison) > 0,
             "deerdead" => sim.Animals.Any(a => a.Dead) || sim.Items.Any(i => i.Def == Defs.Venison),
             "dooropen" => sim.Map.DoorOpen.Values.Any(v => v),
+            "mined" => _graniteAtStart > 0 && sim.Map.Buildings.Count(b => b == Building.Granite) < _graniteAtStart,
             _ => throw new ArgumentException($"unknown expectation '{what}'"),
         };
         if (ok) Log.Info($"AutoPilot: expectation '{what}' met");
