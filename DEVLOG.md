@@ -260,3 +260,8 @@ Added:
 
 Changed:
 * `Play.bat` no longer needs the developer toolchain: it finds Godot next to the game, on PATH or in GODOT
+
+## October 7th, 2026 - Godot install note - Commit 11
+
+Changed:
+* PLAY.md says Godot must be installed, with the official website
