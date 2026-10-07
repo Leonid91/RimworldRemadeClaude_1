@@ -271,3 +271,8 @@ Changed:
 Changed:
 * README holds only how to install Godot and launch the game (Windows, then macOS); PLAY.md merged into it
 * The player guide moved to docs/GUIDE.md
+
+## October 7th, 2026 - Fixed commit issue - Commit 13
+
+Changed:
+* Commits no longer carry a co-author line
