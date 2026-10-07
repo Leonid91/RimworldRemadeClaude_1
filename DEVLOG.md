@@ -18,3 +18,34 @@ Added:
 Bug fixed
 * Temperature was NaN on the pole tile
   * cos(90°) is slightly negative in float and `Pow` of a negative number returns NaN.
+
+## October 6th, 2026 - Local map simulation - Commit 2
+
+Added:
+* Local map layers (terrain, granite rock, buildings, doors, oaks with 12 shape variants, berry bushes, grass, corner heightfield, rock massif heights) with change tracking for the renderer and path grid
+* Map generation from the planet tile: relief by hilliness, granite massifs rising toward their cores (distance transform), rivers entering from the upstream planet neighbours and leaving toward the downstream one, sea along coastal sides, ponds and small lakes, soils, oak groves and clearings, berry bushes, grass density, an abandoned cabin with a door
+* A* pathfinding (8 directions, no corner cutting, generation-stamped workspaces, line-of-sight smoothing) and connected components for instant unreachable rejection
+* Items and a Stalker/Project Zomboid style grid inventory (stack merging, rotation, drag moves) provided by worn containers (trouser pockets, jacket pockets, satchel)
+* Apparel on six layers (skin, middle, outer, headgear, eyes, belt) with per-region conflicts
+* RimWorld human body part tree (brain, skull, eyes, jaw, tongue, ribs, organs, clavicles, fingers, toes…) and a deer body; injuries, bleeding, death rules
+* Pawns: names, sex, biological/chronological age, traits, 12 skills with passions, body mass, encumbrance from real load guidance (25/45/70 % of body mass)
+* Needs (food, thirst, rest) with real-life decay rates; heat increases thirst
+* Simulation loop (60 ticks/s, speeds 1/3/6/15x with a per-frame budget), autonomous AI (sleep, drink, gather and eat berries, wander), drafted orders, direct control with collisions
+* Interactions shared by the E key, the right-click menu and the AI: pick up, gather, drink, open/close door, hunt, attack, eat, go
+* Combat: bow with arrows (projectiles, spread by skill and movement, trees and walls block), melee swings, deer flee and alert their herd, venison and recoverable arrows on death
+* Local weather derived from the planet tile (temperature with diurnal curve, rain/snow, cloud, wind, fog, wetness, snow cover)
+* Versioned, compressed, validated save files that restore the exact simulation state (jobs, paths, projectiles, RNG)
+* 28 new unit tests including the full goal scenario (bow → deer → meat) and deterministic continuation after save/load
+
+Changed:
+* Rock coverage is now a quantile of the rock field, so each hilliness class gets a predictable share of granite
+
+Bug fixed
+* Maps without a coast were generated entirely as shoreline
+  * The sea-distance field defaulted to 0, which means "at the shore", instead of "far inland".
+* Pawns could get stuck on tree trunks
+  * Tree cells were passable for paths while their trunks are solid for movement.
+* Colonists on dry tiles died of thirst
+  * Maps without a river or coast had no fresh water; ponds and lakes are now generated.
+* Games diverged after loading a save
+  * Jobs, paths and think timers were not saved, and loading items consumed the random generator.
