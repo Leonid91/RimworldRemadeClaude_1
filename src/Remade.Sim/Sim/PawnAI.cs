@@ -79,8 +79,47 @@ public sealed partial class GameSim
         }
     }
 
-    /// <summary>Moves a circle through the grid, sliding along walls, rock, closed doors, deep water and tree trunks.</summary>
+    /// <summary>
+    /// Moves a circle through the grid, sliding along walls, rock, closed doors, deep water and tree trunks.
+    /// Doorway assist: if a move is mostly blocked by a corner, try sidestepping a little so the pawn slips through
+    /// openings (doors, gaps between rocks) instead of sticking on the jamb.
+    /// </summary>
     void MoveWithCollision(Pawn p, Vector2 delta)
+    {
+        Vector2 start = p.Position;
+        MoveWithCollisionRaw(p, delta);
+        float want = delta.Length();
+        if (want < 1e-5f || Vector2.Dot(p.Position - start, delta / want) > want * 0.5f) return;
+        // mostly blocked: look for the nearest sideways offset from which the way ahead is clear
+        Vector2 dir = delta / want, side = new(-dir.Y, dir.X);
+        for (float k = 0.05f; k <= 0.6f; k += 0.05f)
+            foreach (float sgn in new[] { 1f, -1f })
+            {
+                Vector2 q = start + side * (k * sgn);
+                if (!CircleFree(q, Pawn.Radius) || !CircleFree(q + dir * 0.4f, Pawn.Radius)) continue;
+                p.Position = start;
+                MoveWithCollisionRaw(p, side * (sgn * MathF.Min(want, k)) + dir * want * 0.3f);
+                return;
+            }
+    }
+
+    /// <summary>True if a circle overlaps no blocked cell (walls, rock, closed doors, deep water).</summary>
+    bool CircleFree(Vector2 c, float r)
+    {
+        int x0 = (int)MathF.Floor(c.X - r), x1 = (int)MathF.Floor(c.X + r);
+        int y0 = (int)MathF.Floor(c.Y - r), y1 = (int)MathF.Floor(c.Y + r);
+        for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++)
+            {
+                if (!Map.InBounds(x, y)) return false;
+                if (!Map.Blocked(Map.Index(x, y))) continue;
+                float cx = Math.Clamp(c.X, x, x + 1), cy = Math.Clamp(c.Y, y, y + 1);
+                if ((c.X - cx) * (c.X - cx) + (c.Y - cy) * (c.Y - cy) < r * r) return false;
+            }
+        return true;
+    }
+
+    void MoveWithCollisionRaw(Pawn p, Vector2 delta)
     {
         Vector2 pos = p.Position;
         pos.X += delta.X;

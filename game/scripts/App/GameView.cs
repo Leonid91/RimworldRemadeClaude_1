@@ -71,8 +71,31 @@ public partial class GameView : Node3D
         AddChild(Hud);
         Hud.Inspect.OnModeChanged = OnModeChanged;
         Select(first);
+        if (Args.Has("gfx-off")) DisableFeatures(Args.Get("gfx-off"));
         Hud.Message($"Your colonists have landed. {sim.Weather.Describe()}, {sim.Weather.Temperature:F0} °C. An old cabin stands nearby.", UiKit.Accent);
         Log.Info($"GameView ready: map {sim.Map.Width}x{sim.Map.Height}, {sim.Pawns.Count} colonists, {sim.Animals.Count} deer");
+    }
+
+    /// <summary>Profiling aid (--gfx-off=shadows,ssao,fog,grass,trees,water,taa,glow,hud): turns features off to measure their cost.</summary>
+    void DisableFeatures(string list)
+    {
+        foreach (var f in list.Split(','))
+        {
+            switch (f.Trim())
+            {
+                case "shadows": _light.SetShadows(false); break;
+                case "ssao": _light.Env.SsaoEnabled = false; break;
+                case "fog": _light.Env.VolumetricFogEnabled = false; _light.Env.FogEnabled = false; break;
+                case "glow": _light.Env.GlowEnabled = false; break;
+                case "grass": _flora.GrassEnabled = false; break;
+                case "trees": _flora.Visible = false; break;
+                case "water": _map.WaterVisible = false; break;
+                case "taa": Main.I.GetViewport().UseTaa = false; break;
+                case "hud": Hud.Visible = false; break;
+                default: throw new ArgumentException($"--gfx-off: unknown feature '{f}'");
+            }
+            Log.Info($"Feature disabled for profiling: {f}");
+        }
     }
 
     public void ApplyGraphicsSettings()
@@ -151,7 +174,7 @@ public partial class GameView : Node3D
         if (reveal != null)
         {
             var rp = _entities.PawnVisualPos(reveal);
-            RenderingServer.GlobalShaderParameterSet("reveal_pos", new Vector4(rp.X, rp.Y, rp.Z, controlled != null ? 4.5f : 2.5f));
+            RenderingServer.GlobalShaderParameterSet("reveal_pos", new Vector4(rp.X, rp.Y, rp.Z, controlled != null ? 7.5f : 4.5f));
         }
         _entities.ShowAim = controlled != null && _aiming;
         _entities.AimRange = controlled != null ? GameSim.AttackRange(controlled) : 0;
@@ -225,11 +248,8 @@ public partial class GameView : Node3D
             _entities.Target = null;
             return;
         }
-        var v = Vector2.Zero;
-        if (Input.IsActionPressed("move_up")) v.Y -= 1;
-        if (Input.IsActionPressed("move_down")) v.Y += 1;
-        if (Input.IsActionPressed("move_left")) v.X -= 1;
-        if (Input.IsActionPressed("move_right")) v.X += 1;
+        // analog-capable (gamepad sticks, automation); keyboard gives the usual 8 directions
+        var v = Input.GetVector("move_left", "move_right", "move_up", "move_down");
         var md = v == Vector2.Zero ? Vector2.Zero : _cam.ScreenToMapDir(v.Normalized());
         inp.Move = new SV2(md.X, md.Y);
         inp.Sprint = Input.IsActionPressed("sprint");

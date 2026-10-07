@@ -219,11 +219,12 @@ public static class MapGen
                 // river bed and sea floor below the water surface
                 if (riverDist[i] < riverHalfWidth)
                 {
+                    // channel cross-section, continuous with the bank at the edge (h = 0.05 m)
                     float t = riverDist[i] / MathF.Max(0.5f, riverHalfWidth);
-                    h = -0.25f - (1f - t * t) * (0.6f + riverHalfWidth * 0.12f);
+                    h = 0.05f - (1f - t * t) * (0.75f + riverHalfWidth * 0.12f) - (1f - t) * 0.15f;
                 }
                 else if (riverDist[i] < riverHalfWidth + 3f) h = MathF.Min(h, 0.05f + (riverDist[i] - riverHalfWidth) * 0.15f);
-                if (pond[i] < 1f) h = MathF.Min(h, -0.2f - (1f - pond[i]) * 1.6f);
+                if (pond[i] < 1f) h = MathF.Min(h, 0.05f - (1f - pond[i]) * 1.8f);
                 else if (pond[i] < 1.35f) h = MathF.Min(h, 0.05f + (pond[i] - 1f) * 1.2f);
                 if (seaDepth[i] > -6f)
                 {
@@ -506,7 +507,7 @@ public static class MapGen
                 int i = y * W + x;
                 var t = map.Terrain[i];
                 if (map.Buildings[i] != Building.None || TerrainDef.Of(t).Water || t == Terrain.Sand || t == Terrain.RoughGranite) continue;
-                if (res.InCabinZone(x, y, 2)) continue;
+                if (res.InCabinZone(x, y, 5)) continue; // a clearing around the cabin so it can be seen from above
                 float f = forest.Fbm(x * 0.012f, y * 0.012f, 4) * 0.5f + 0.5f;  // groves vs clearings
                 float density = treeBase * SmoothStep(0.32f, 0.62f, f) * 2.2f * TerrainDef.Of(t).Fertility;
                 float dc = Vector2.Distance(new Vector2(x, y), center);

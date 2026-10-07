@@ -84,12 +84,15 @@ public partial class Lighting : Node3D
         return _stars;
     }
 
+    public Godot.Environment Env => _e;
+    public void SetShadows(bool on) { _sun.ShadowEnabled = on; _moon.ShadowEnabled = on; }
+
     public void ApplyQuality()
     {
         int q = Settings.ShadowQuality;
         _sun.ShadowEnabled = q > 0;
         _moon.ShadowEnabled = q >= 2;
-        _sun.DirectionalShadowMode = q >= 2 ? DirectionalLight3D.ShadowMode.Parallel4Splits : DirectionalLight3D.ShadowMode.Parallel2Splits;
+        _sun.DirectionalShadowMode = q >= 3 ? DirectionalLight3D.ShadowMode.Parallel4Splits : DirectionalLight3D.ShadowMode.Parallel2Splits;
         RenderingServer.DirectionalShadowAtlasSetSize(q >= 3 ? 8192 : q == 2 ? 4096 : 2048, true);
         RenderingServer.DirectionalSoftShadowFilterSetQuality(q >= 3 ? RenderingServer.ShadowQuality.SoftHigh : q == 2 ? RenderingServer.ShadowQuality.SoftMedium : RenderingServer.ShadowQuality.SoftLow);
         _e.SsaoEnabled = Settings.Ssao;
@@ -152,7 +155,7 @@ public partial class Lighting : Node3D
         _e.FogDepthBegin = 0;
 
         // shadow distance follows zoom
-        _sun.DirectionalShadowMaxDistance = Mathf.Clamp(camDistance * 2.6f, 40f, 260f);
+        _sun.DirectionalShadowMaxDistance = Mathf.Clamp(camDistance * 1.9f, 35f, 220f);
         _moon.DirectionalShadowMaxDistance = Mathf.Clamp(camDistance * 1.8f, 30f, 160f);
 
         // shader globals

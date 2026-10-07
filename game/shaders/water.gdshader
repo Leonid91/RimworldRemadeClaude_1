@@ -27,10 +27,19 @@ void vertex() {
 void fragment() {
 	vec2 p = wpos.xz;
 	float t = TIME;
-	vec2 drift = flow * t * 0.6 + wind_dir * t * 0.05 * (0.3 + wind_strength);
-	vec3 n1 = texture(normal_a, p * 0.11 + drift).xyz * 2.0 - 1.0;
-	vec3 n2 = texture(normal_b, p * 0.23 - drift * 0.6 + vec2(0.37, 0.11)).xyz * 2.0 - 1.0;
-	vec3 n = normalize(vec3(n1.xy + n2.xy, 2.4 - wind_strength * 0.8));
+	// wind drift is uniform; river flow varies in space, so it uses the two-phase flow-map technique
+	// (two layers restarting half a cycle apart, cross-faded) to avoid stretching over time
+	vec2 wind_drift = wind_dir * t * 0.05 * (0.3 + wind_strength);
+	float ph0 = fract(t * 0.35), ph1 = fract(t * 0.35 + 0.5);
+	float blend = abs(1.0 - 2.0 * ph0);
+	vec2 f = flow * 1.6;
+	vec3 a0 = texture(normal_a, p * 0.11 + wind_drift - f * ph0).xyz;
+	vec3 a1 = texture(normal_a, p * 0.11 + wind_drift - f * ph1 + vec2(0.5, 0.21)).xyz;
+	vec3 b0 = texture(normal_b, p * 0.23 - wind_drift * 0.6 - f * ph0 * 1.3 + vec2(0.37, 0.11)).xyz;
+	vec3 b1 = texture(normal_b, p * 0.23 - wind_drift * 0.6 - f * ph1 * 1.3 + vec2(0.12, 0.64)).xyz;
+	vec3 n1 = mix(a1, a0, blend) * 2.0 - 1.0;
+	vec3 n2 = mix(b1, b0, blend) * 2.0 - 1.0;
+	vec3 n = normalize(vec3((n1.xy + n2.xy) * 0.6, 2.4 - wind_strength * 0.8));
 	// rain ripples
 	if (wetness > 0.0) {
 		vec2 cell = floor(p * 2.0);
@@ -59,13 +68,13 @@ void fragment() {
 	vec3 water = mix(shallow_color, deep_color, clamp(thickness * 0.35, 0.0, 1.0)) * (0.35 + 0.65 * daylight);
 	vec3 col = mix(bed, water, clamp(a * 0.9 + 0.08, 0.0, 1.0));
 	// shore foam
-	float foam = smoothstep(0.25, 0.0, thickness) * (0.6 + 0.4 * vnoise2(p * 6.0 + t * vec2(0.4, 0.3)));
-	foam += length(flow) * smoothstep(0.55, 0.85, vnoise2(p * 3.0 - flow * t * 1.5)) * 0.25;
+	float foam = smoothstep(0.1, 0.0, thickness) * (0.5 + 0.5 * vnoise2(p * 6.0 + t * vec2(0.4, 0.3))) * 0.6;
+	foam += length(flow) * smoothstep(0.6, 0.9, mix(vnoise2(p * 3.0 - f * ph1), vnoise2(p * 3.0 - f * ph0 + 3.7), blend)) * 0.3;
 	col = mix(col, vec3(0.86, 0.90, 0.88) * (0.4 + 0.6 * daylight), clamp(foam, 0.0, 1.0) * 0.7);
 	col = mix(col, vec3(0.85, 0.9, 0.95), snow_cover * smoothstep(0.1, 0.0, thickness) * 0.5);
 	EMISSION = col * 0.65; // refracted light is already lit: emit it, let the surface add reflections
 	ALBEDO = col * 0.35;
-	ROUGHNESS = 0.06 + wetness * 0.05;
+	ROUGHNESS = 0.12 + wetness * 0.05;
 	SPECULAR = 0.55;
 	METALLIC = 0.0;
 	ALPHA = clamp(0.55 + a * 0.45 + foam, 0.0, 1.0);

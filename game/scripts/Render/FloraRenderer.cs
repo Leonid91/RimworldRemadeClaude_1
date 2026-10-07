@@ -15,7 +15,7 @@ namespace Remade.Game.Render;
 /// </summary>
 public partial class FloraRenderer : Node3D
 {
-    const int Region = 64;
+    const int Region = 128; // large regions: few MultiMesh draws (and shadow draws) per frame
     readonly GameSim _sim;
     readonly LocalMap _map;
     readonly int _rw, _rh;
@@ -26,7 +26,7 @@ public partial class FloraRenderer : Node3D
     MultiMeshInstance3D _grass;
     ShaderMaterial _grassMat;
     int _grassR;
-    public float DetailDistance = 85f;
+    public float DetailDistance = 60f;
     public int Instances { get; private set; }
 
     sealed class RegionNode
@@ -157,7 +157,9 @@ public partial class FloraRenderer : Node3D
         for (int v = 0; v < oakXf.Length; v++)
         {
             if (oakXf[v] == null) continue;
-            AddMM(r.Root, _oaks[v].Detail, oakXf[v], 0, DetailDistance, true);
+            // near: detailed mesh, shadows cast by the cheap low-LOD mesh (shadow-only); far: low-LOD mesh
+            AddMM(r.Root, _oaks[v].Detail, oakXf[v], 0, DetailDistance, false);
+            AddMM(r.Root, _oaks[v].Low, oakXf[v], 0, DetailDistance, true, shadowOnly: true);
             AddMM(r.Root, _oaks[v].Low, oakXf[v], DetailDistance - 8, 0, true);
         }
         for (int v = 0; v < bushXf.Length; v++)
@@ -170,14 +172,14 @@ public partial class FloraRenderer : Node3D
         r.Built = true; r.Dirty = false;
     }
 
-    MultiMeshInstance3D AddMM(Node3D parent, Mesh mesh, List<Transform3D> xf, float visBegin, float visEnd, bool shadows, bool custom = false)
+    MultiMeshInstance3D AddMM(Node3D parent, Mesh mesh, List<Transform3D> xf, float visBegin, float visEnd, bool shadows, bool custom = false, bool shadowOnly = false)
     {
         var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseCustomData = custom, Mesh = mesh, InstanceCount = xf.Count };
         for (int k = 0; k < xf.Count; k++) mm.SetInstanceTransform(k, xf[k]);
         var mmi = new MultiMeshInstance3D
         {
             Multimesh = mm,
-            CastShadow = shadows ? GeometryInstance3D.ShadowCastingSetting.On : GeometryInstance3D.ShadowCastingSetting.Off,
+            CastShadow = shadowOnly ? GeometryInstance3D.ShadowCastingSetting.ShadowsOnly : shadows ? GeometryInstance3D.ShadowCastingSetting.On : GeometryInstance3D.ShadowCastingSetting.Off,
             VisibilityRangeBegin = visBegin, VisibilityRangeEnd = visEnd,
             VisibilityRangeBeginMargin = visBegin > 0 ? 8 : 0, VisibilityRangeEndMargin = visEnd > 0 ? 8 : 0,
             VisibilityRangeFadeMode = GeometryInstance3D.VisibilityRangeFadeModeEnum.Self,
@@ -267,10 +269,12 @@ public partial class FloraRenderer : Node3D
     }
 
     /// <summary>Moves the grass window with the camera focus and hides it when zoomed far out.</summary>
+    public bool GrassEnabled = true;
+
     public void UpdateGrass(Vector3 focus, float camDistance)
     {
         if (_grass.Multimesh == null) return;
-        bool show = camDistance < 95f && Settings.GrassDensity > 0.01f;
+        bool show = GrassEnabled && camDistance < 95f && Settings.GrassDensity > 0.01f;
         _grass.Visible = show;
         if (!show) return;
         _grass.Position = new Vector3(Mathf.Floor(focus.X) - _grassR, 0, Mathf.Floor(focus.Z) - _grassR);

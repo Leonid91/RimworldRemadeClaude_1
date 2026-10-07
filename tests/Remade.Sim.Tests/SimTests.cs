@@ -558,3 +558,26 @@ public class SaveTests : IDisposable
         Assert.Throws<SaveFormatException>(() => SaveGame.ReadHeader(path));
     }
 }
+
+public class DirectControlTests
+{
+    /// <summary>A colonist pushed diagonally into a door jamb must slip through the open door instead of sticking.</summary>
+    [Fact]
+    public void DoorwayAssistSlipsThroughOpenDoor()
+    {
+        var planet = new Planet(new WorldParams { Seed = 1, Frequency = 16 });
+        var map = new LocalMap(20, 20, 0, 1);
+        for (int y = 0; y < 20; y++) map.Buildings[map.Index(10, y)] = Building.WoodWall;
+        map.Buildings[map.Index(10, 10)] = Building.Door;
+        map.DoorOpen[map.Index(10, 10)] = true;
+        var sim = new GameSim(planet, map, 1);
+        int id = 1;
+        var p = PawnGenerator.GenerateGroup(1, 3, () => id++)[0];
+        p.Position = new Vector2(11.5f, 10.05f); // east of the door, nearly at the jamb's corner
+        sim.Pawns.Add(p);
+        sim.SetMode(p, ControlMode.Direct);
+        sim.Input.Move = Vector2.Normalize(new Vector2(-1f, -0.25f)); // west and slightly north, into the wall corner
+        for (int t = 0; t < 120 && p.Position.X > 9.5f; t++) sim.Step();
+        Assert.True(p.Position.X < 10f, $"stuck at {p.Position}");
+    }
+}

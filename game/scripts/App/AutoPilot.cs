@@ -136,14 +136,40 @@ public partial class AutoPilot : Node
             case "cam":
             {
                 var p = arg.Split(',');
-                Game.Camera.Distance = F(p[0]);
-                Game.Camera.Zoom(1f);
                 SetCamDistance(F(p[0]));
                 if (p.Length > 1) Game.Camera.Rotate(Mathf.DegToRad(F(p[1])) - Game.Camera.Yaw);
                 _wait = 0.8;
                 break;
             }
             case "hour": AdvanceToHour(F(arg)); _wait = 0.5; break;
+            case "camfind":
+            {
+                // centre the camera on the nearest cell of a kind (water, rock, tree, bush, cabin)
+                var sim = Game.Sim;
+                var f = Game.Camera.Focus;
+                Func<int, bool> match = arg switch
+                {
+                    "water" => c => sim.Map.TerrainAt(c).Water,
+                    "rock" => c => sim.Map.Buildings[c] == Building.Granite,
+                    "tree" => c => sim.Map.Plants[c] == Plant.Oak,
+                    "bush" => c => sim.Map.Plants[c] == Plant.BerryBush,
+                    "cabin" => c => sim.Map.Buildings[c] == Building.Door,
+                    _ => throw new ArgumentException($"camfind: unknown kind '{arg}'"),
+                };
+                int best = -1; float bestD = float.MaxValue;
+                for (int c = 0; c < sim.Map.CellCount; c++)
+                {
+                    if (!match(c)) continue;
+                    float d = SV2.DistanceSquared(sim.Map.CellCenter(c), new SV2(f.X, f.Z));
+                    if (d < bestD) { bestD = d; best = c; }
+                }
+                if (best < 0) { Fail($"camfind: no {arg} on this map"); break; }
+                var cc = sim.Map.CellCenter(best);
+                Game.Camera.Follow = false;
+                Game.Camera.JumpTo(new Vector3(cc.X, 0, cc.Y));
+                _wait = 1.0;
+                break;
+            }
             case "walkto": WalkTo(arg); break;
             case "interact": Interact(arg); break;
             case "deer_near": DeerNear(F(arg)); _wait = 0.3; break;
@@ -257,18 +283,43 @@ public partial class AutoPilot : Node
         var res = sim.Pathfinder.FindPath(sim.Map.CellAt(pawn.Position), goal, path);
         if (res != PathResult.Found) { Fail($"walkto {what}: {res}"); return; }
         path.Add(target);
+        Log.Debug($"walkto {what}: from {pawn.Position} to {target}, path {string.Join(" ", path.Select(v => $"({v.X:F1},{v.Y:F1})"))}");
         int idx = 0;
         float stop = what.StartsWith("item:") ? 0.8f : 0.5f;
         SV2 lastPos = pawn.Position; double stuck = 0;
+        int replans = 0;
         Begin($"walkto {what}", () =>
         {
             if (SV2.Distance(pawn.Position, target) <= stop) return true;
-            while (idx < path.Count - 1 && SV2.Distance(pawn.Position, path[idx]) < 0.35f) idx++;
+            while (idx < path.Count - 1 && SV2.Distance(pawn.Position, path[idx]) < 0.2f) idx++;
+            if (stuck > 1.0 && replans < 3)
+            {
+                // blocked: plan again from where we are (like a player would)
+                replans++; stuck = 0;
+                path.Clear();
+                if (sim.Pathfinder.FindPath(sim.Map.CellAt(pawn.Position), goal, path) == PathResult.Found)
+                {
+                    path.Insert(0, sim.Map.CellCenter(sim.Map.CellAt(pawn.Position)));
+                    path.Add(target);
+                    idx = 0;
+                    Log.Debug($"walkto {what}: re-planned from {pawn.Position}");
+                }
+            }
             var d = path[idx] - pawn.Position;
             SteerKeys(d);
             if (SV2.Distance(lastPos, pawn.Position) < 0.001f && sim.SpeedIndex > 0) stuck += GetProcessDeltaTime(); else stuck = 0;
             lastPos = pawn.Position;
-            if (stuck > 3) { Fail($"walkto {what}: stuck at {pawn.Position}"); return true; }
+            if (stuck > 3)
+            {
+                int c = sim.Map.CellAt(pawn.Position);
+                sim.Map.XY(c, out int cx, out int cy);
+                var around = new System.Text.StringBuilder();
+                for (int yy = cy - 1; yy <= cy + 1; yy++)
+                    for (int xx = cx - 1; xx <= cx + 1; xx++)
+                        around.Append(sim.Map.InBounds(xx, yy) ? (sim.Map.Blocked(sim.Map.Index(xx, yy)) ? '#' : sim.Map.Plants[sim.Map.Index(xx, yy)] == Plant.Oak ? 'T' : '.') : 'X').Append(xx == cx + 1 ? "/" : "");
+                Fail($"walkto {what}: stuck at {pawn.Position} heading to waypoint {idx} {path[idx]} (cells around {cx},{cy}: {around}, job {pawn.Job?.Kind.ToString() ?? "none"})");
+                return true;
+            }
             return false;
         }, 90);
     }
@@ -284,10 +335,11 @@ public partial class AutoPilot : Node
         var down = new SV2(MathF.Sin(yaw), MathF.Cos(yaw));
         var dir = SV2.Normalize(mapDir);
         float sx = SV2.Dot(dir, right), sy = SV2.Dot(dir, down);
-        if (sx > 0.38f) Input.ActionPress("move_right");
-        if (sx < -0.38f) Input.ActionPress("move_left");
-        if (sy > 0.38f) Input.ActionPress("move_down");
-        if (sy < -0.38f) Input.ActionPress("move_up");
+        // analog strengths, like a gamepad stick, through the same input actions the keys use
+        if (sx > 0.01f) Input.ActionPress("move_right", sx);
+        if (sx < -0.01f) Input.ActionPress("move_left", -sx);
+        if (sy > 0.01f) Input.ActionPress("move_down", sy);
+        if (sy < -0.01f) Input.ActionPress("move_up", -sy);
     }
 
     void Interact(string label)

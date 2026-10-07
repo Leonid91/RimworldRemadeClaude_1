@@ -57,7 +57,7 @@ void vertex() {
 }
 
 void fragment() {
-	vec3 col = COLOR.rgb * (0.9 + coat * 0.2);
+	vec3 col = pow(COLOR.rgb, vec3(2.2)) * (0.9 + coat * 0.2); // vertex colours are sRGB
 	col *= cloud_shadow(wpos.xz);
 	col = mix(col, col * 0.75, wetness);
 	ALBEDO = col;

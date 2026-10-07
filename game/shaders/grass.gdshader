@@ -14,6 +14,7 @@ uniform float density_scale = 1.0;
 varying float tip;
 varying float shade;
 varying vec3 wpos;
+varying float cloud;
 
 void vertex() {
 	// world_vertex_coords: VERTEX is in world space; the node sits at the snapped window origin and every
@@ -46,15 +47,18 @@ void vertex() {
 	vec3 world = vec3(world_xz.x, ground, world_xz.y) + v;
 	shade = h;
 	wpos = world;
+	cloud = cloud_shadow(world_xz);
 	VERTEX = world;
 }
 
 void fragment() {
+	// two-sided cards share one (spherized) normal: undo Godot's automatic back-face normal flip
+	if (!FRONT_FACING) NORMAL = -NORMAL;
 	vec3 base = mix(vec3(0.16, 0.26, 0.07), vec3(0.30, 0.38, 0.12), shade);
 	vec3 col = season_grass(base);
 	col = mix(col * 0.45, col * 1.15, tip);   // darker at the root
 	col *= 1.0 - wetness * 0.2;
-	col *= cloud_shadow(wpos.xz);
+	col *= cloud;
 	ALBEDO = col;
 	ROUGHNESS = 0.8;
 	BACKLIGHT = col * 0.5 * tip;

@@ -264,7 +264,7 @@ void fragment() {
         if (c.Built) Free(c);
         int x0 = c.X * ChunkSize, y0 = c.Y * ChunkSize;
         int x1 = Math.Min(_map.Width, x0 + ChunkSize), y1 = Math.Min(_map.Height, y0 + ChunkSize);
-        c.Ground = Attach(BuildGround(x0, y0, x1, y1), _terrainMat, true);
+        c.Ground = Attach(BuildGround(x0, y0, x1, y1), _terrainMat, false); // receives shadows; gentle hills rarely cast visible ones
         c.Rock = Attach(BuildRock(x0, y0, x1, y1), _rockMat, true);
         c.Water = Attach(BuildWater(x0, y0, x1, y1), _waterMat, false);
         c.Walls = Attach(BuildWalls(x0, y0, x1, y1), _wallMat, true);
@@ -272,9 +272,12 @@ void fragment() {
         BuiltChunks++;
     }
 
+    public bool WaterVisible = true;
+
     MeshInstance3D Attach(ArrayMesh mesh, Material mat, bool shadows)
     {
         if (mesh == null) return null;
+        if (mat == _waterMat && !WaterVisible) return null;
         var mi = new MeshInstance3D
         {
             Mesh = mesh, MaterialOverride = mat,
@@ -413,6 +416,9 @@ void fragment() {
     ArrayMesh BuildWater(int x0, int y0, int x1, int y1)
     {
         var b = new MeshBuilder();
+        int cw = x1 - x0 + 1;
+        var corner = new int[cw * (y1 - y0 + 1)];
+        Array.Fill(corner, -1);
         bool any = false;
         for (int y = y0; y < y1; y++)
             for (int x = x0; x < x1; x++)
@@ -425,20 +431,33 @@ void fragment() {
                         int nx = x + dx, ny = y + dy;
                         if (_map.InBounds(nx, ny) && _map.TerrainAt(_map.Index(nx, ny)).Water) wet = true;
                     }
-                if (!wet) continue;
-                if (_map.Buildings[_map.Index(x, y)] == Building.Granite) continue;
+                if (!wet || _map.Buildings[_map.Index(x, y)] == Building.Granite) continue;
                 any = true;
-                int i = _map.Index(x, y);
-                var f = new Color(_flow[i * 2] / 255f, _flow[i * 2 + 1] / 255f, _map.Terrain[i] is Terrain.RiverDeep or Terrain.RiverShallow ? 0.25f : 0f);
-                if (f.B == 0) f = new Color(0.5f, 0.5f, 0);
-                const float L = LocalMap.WaterLevel;
-                int a = b.Add(new GV3(x, L, y), GV3.Up, new GV2(x, y), f);
-                int bb = b.Add(new GV3(x + 1, L, y), GV3.Up, new GV2(x + 1, y), f);
-                int c = b.Add(new GV3(x + 1, L, y + 1), GV3.Up, new GV2(x + 1, y + 1), f);
-                int d = b.Add(new GV3(x, L, y + 1), GV3.Up, new GV2(x, y + 1), f);
+                int a = Corner(x, y), bb = Corner(x + 1, y), c = Corner(x + 1, y + 1), d = Corner(x, y + 1);
                 b.Tri(a, bb, d); b.Tri(bb, c, d);
             }
         return any ? b.Commit() : null;
+
+        // shared corner vertices; flow = average of the river cells around the corner, so it varies smoothly
+        int Corner(int cx, int cy)
+        {
+            int k = (cy - y0) * cw + (cx - x0);
+            if (corner[k] >= 0) return corner[k];
+            float fx = 0, fy = 0; int n = 0, cells = 0;
+            for (int dy = -1; dy <= 0; dy++)
+                for (int dx = -1; dx <= 0; dx++)
+                {
+                    int x = cx + dx, y = cy + dy;
+                    if (!_map.InBounds(x, y)) continue;
+                    cells++;
+                    int i = _map.Index(x, y);
+                    if (_map.Terrain[i] is not (Terrain.RiverDeep or Terrain.RiverShallow)) continue;
+                    fx += _flow[i * 2] / 255f * 2f - 1f; fy += _flow[i * 2 + 1] / 255f * 2f - 1f; n++;
+                }
+            var f = n > 0 ? new Color((fx / n) * 0.5f + 0.5f, (fy / n) * 0.5f + 0.5f, 0.25f * n / Math.Max(1, cells)) : new Color(0.5f, 0.5f, 0f);
+            corner[k] = b.Add(new GV3(cx, LocalMap.WaterLevel, cy), GV3.Up, new GV2(cx, cy), f);
+            return corner[k];
+        }
     }
 
     // ------------------------------------------------------------------ walls and doors
@@ -482,7 +501,7 @@ void fragment() {
         leaf.Box(new GV3(0.4f, 1.05f, 0), new GV3(0.4f, 1.05f, 0.05f));
         leaf.Color = new Color(0.25f, 0.25f, 0.25f);
         leaf.Box(new GV3(0.7f, 1.05f, -0.07f), new GV3(0.03f, 0.03f, 0.03f));
-        hinge.AddChild(new MeshInstance3D { Mesh = leaf.Commit(new StandardMaterial3D { VertexColorUseAsAlbedo = true, Roughness = 0.8f }) });
+        hinge.AddChild(new MeshInstance3D { Mesh = leaf.Commit(new StandardMaterial3D { VertexColorUseAsAlbedo = true, VertexColorIsSrgb = true, Roughness = 0.8f }) });
         root.SetMeta("open", _map.DoorOpen[cell]);
         AddChild(root);
         Doors[cell] = root;

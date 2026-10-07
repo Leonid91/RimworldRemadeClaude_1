@@ -20,7 +20,7 @@ public partial class PawnModel : Node3D
     string _outfitKey = "";
     Pawn _pawn;
 
-    static readonly StandardMaterial3D Vc = new() { VertexColorUseAsAlbedo = true, Roughness = 0.8f };
+    static readonly StandardMaterial3D Vc = new() { VertexColorUseAsAlbedo = true, VertexColorIsSrgb = true, Roughness = 0.8f };
 
     public PawnModel(Pawn p)
     {

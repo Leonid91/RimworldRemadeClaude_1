@@ -75,3 +75,28 @@ Bug fixed
   * Uniqueness was only checked on first names.
 * Engine error "Node not inside tree" in the colonist portrait
   * The portrait camera used LookAt before being added to the scene tree.
+
+## October 6th, 2026 - Goal scenario playable, faster - Commit 4
+
+Added:
+* The full first-version goal is playable and verified in the real game through real inputs: take direct control, open the cabin door with E, pick up the bow and arrows, aim with the right mouse button, shoot a deer with left clicks, the deer drops venison, pick the meat up
+* Doorway assist for direct control: when a move is blocked by a corner, the colonist sidesteps into the nearest opening (doors, gaps) instead of sticking
+* Analog movement input (Input.GetVector): gamepad sticks work and automation steers precisely through the same input actions
+* Debug/profiling switches: --weather= (pins local weather), --gfx-off= (shadows, ssao, fog, glow, grass, trees, water, taa, hud), --perf readout; AutoPilot commands camfind and cam, and a re-planning walker with diagnostics when blocked
+* Unit test for the doorway assist
+
+Changed:
+* Oak meshes rebuilt for an overhead camera (about 450 triangles detailed, 100 for the low LOD instead of about 1500); shadows are cast by the low LOD mesh only; flora regions of 128 cells; the ground no longer casts shadows; 2 shadow cascades on Medium, 4 on High → frame time 13.6 ms → 8.3 ms, triangles 5.7 M → 1.2 M in the test view
+* Cloud shadows evaluated per vertex for foliage, bark and grass
+* Larger clearing around the cabin and a wider canopy cut-away around the controlled colonist so both stay visible from above
+* Leaf cards tilted toward the sky; river beds and pond floors meet the banks continuously; thinner foam
+
+Bug fixed
+* Foliage, bushes and grass blades were far too dark
+  * The leaf texture (linear) was normalised by sRGB reference values, and Godot flips normals on back faces of two-sided cards.
+* Deer, colonists and items looked washed out
+  * Vertex colours authored in sRGB were used as linear colours.
+* Square artefacts on rivers
+  * Each water cell had its own flow vector, so the scrolling normal maps broke at cell edges; flow is now per shared corner with two-phase flow mapping.
+* The cabin and colonists were hidden under the forest canopy
+  * The cabin could be placed inside the forest with only a 2-cell clearing.
