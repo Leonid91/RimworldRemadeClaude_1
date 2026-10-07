@@ -49,3 +49,29 @@ Bug fixed
   * Maps without a river or coast had no fresh water; ponds and lakes are now generated.
 * Games diverged after loading a save
   * Jobs, paths and think timers were not saved, and loading items consumed the random generator.
+
+## October 6th, 2026 - Godot game and menus - Commit 3
+
+Added:
+* Godot 4.7 .NET game project referencing the simulation library; boot sequence with persistent logging, Godot engine errors and unhandled exceptions routed into the log, and an on-screen error banner
+* Settings file with rebindable keys, one-click AZERTY (ZQSD) remap with automatic detection of French/Belgian layouts, graphics, audio and gameplay options
+* Main menu over an orbital dawn: the planet's limb with atmospheric glow and the sun rising behind it
+* Set-up flow: scenario screen (prepared, empty), colonist creation sheet (names, sex, ages, traits, 12 skills with passions, health, worn gear, carrying capacity, 3D portrait, randomize, team skills), world generation screen with Generate, landing-site globe, map sizes from 300 to 1500, Play
+* Globe: smooth sphere shaded from baked cubemaps (soft biome blending from interpolated climate, sea depth, sea ice, snow caps, relief normals, rivers drawn as smoothed lines), clouds, atmosphere, space sky; hexagon outlines only around the hovered tile, pulsing outline and beacon on the selected tile; live temperature, elevation and precipitation overlays with legends
+* Colony renderer: lazily streamed 64×64 terrain chunks with procedural terrain texture splatting, granite massifs with jagged cliffs, water with refraction, foam and flow, log-cabin walls and an animated door, oak trees (12 variants, detail + low LOD) and berry bushes as region MultiMeshes, a camera-centred GPU grass field, vertex-animated deer (one draw call per sex), animated colonist puppets, ground items, flying arrows, selection ring, interaction highlight and red aim line
+* Lighting from real solar geometry (latitude, season, hour), moonlight, physical sky with stars, fog and volumetric haze driven by the planet's weather, rain and snow particles, cloud shadows, wetness and snow cover in the shaders
+* Procedurally synthesised sound: wind, rain, water, leaves, birds, crickets reacting to the environment; bow, arrow hits, door, pick-up, drinking, footsteps
+* HUD: colonist bar, time/weather panel with speed controls, messages, inspect panel with Bio / Equipment (layered body figure, grid inventory with drag and drop and load bar) / Needs / Health (per-part conditions, operations with an empty Add bill), Draft and Direct control buttons, right-click order menu, direct-control interaction list (E + mouse wheel), aim readout, pause menu with saving, in-game planet view
+* AutoPilot for automated runs through the real UI and input, with screenshots and a PASS/FAIL result
+
+Changed:
+* The simulation and game assemblies are always JIT-optimised
+* Climate interpolation uses dot-product weights and one pass for several fields (no acos per sample)
+
+Bug fixed
+* The globe looked like streaky plastic
+  * Relief normals were about 25 times too strong.
+* Two colonists could share the same nickname
+  * Uniqueness was only checked on first names.
+* Engine error "Node not inside tree" in the colonist portrait
+  * The portrait camera used LookAt before being added to the scene tree.

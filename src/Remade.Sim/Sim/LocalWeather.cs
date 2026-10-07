@@ -28,9 +28,13 @@ public sealed class LocalWeather
 
     public const int UpdateInterval = 250; // ticks (6 game minutes)
 
+    /// <summary>Debug/testing only (command line): pins the local weather instead of following the planet.</summary>
+    public string DebugOverride;
+
     public void Update(Planet planet, int tile, long tick, bool snap)
     {
         var s = planet.Climate.Sample(tile);
+        if (DebugOverride != null) { ApplyOverride(s, tick); return; }
         float hour = GameTime.HourOfDay(tick);
         float dtHours = UpdateInterval / (float)GameTime.TicksPerHour;
         float k = snap ? 1f : 0.08f;
@@ -68,6 +72,22 @@ public sealed class LocalWeather
             float melt = Temperature > 0.5f ? (Temperature * 0.03f + Rain * 0.2f) : 0f;
             SnowCover = Math.Clamp(SnowCover + (Snowfall * 0.25f - melt) * dtHours, 0f, 1f);
         }
+    }
+
+    void ApplyOverride(ClimateSample s, long tick)
+    {
+        Temperature = s.TemperatureAtHour(GameTime.HourOfDay(tick));
+        PlanetTemperature = s.Temperature;
+        (Rain, Snowfall, Cloud, Fog, Wetness, SnowCover, WindSpeed) = DebugOverride switch
+        {
+            "clear" => (0f, 0f, 0.15f, 0f, 0f, 0f, 3f),
+            "cloudy" => (0f, 0f, 0.75f, 0.05f, 0.1f, 0f, 5f),
+            "rain" => (0.6f, 0f, 0.9f, 0.15f, 0.8f, 0f, 8f),
+            "storm" => (1f, 0f, 1f, 0.2f, 1f, 0f, 16f),
+            "fog" => (0f, 0f, 0.5f, 0.75f, 0.3f, 0f, 1f),
+            "snow" => (0f, 0.6f, 0.85f, 0.15f, 0f, 0.85f, 5f),
+            _ => throw new ArgumentException($"unknown weather override '{DebugOverride}' (clear|cloudy|rain|storm|fog|snow)"),
+        };
     }
 
     public string Describe()

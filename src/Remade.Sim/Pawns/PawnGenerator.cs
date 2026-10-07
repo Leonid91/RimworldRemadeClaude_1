@@ -108,7 +108,8 @@ public static class PawnGenerator
         while (list.Count < count)
         {
             var p = Generate(ref rng, newId);
-            if (!used.Add(p.FirstName)) continue;
+            // colonists are told apart by their display name (nickname or first name)
+            if (!used.Add(p.FirstName) || !used.Add(p.Name) && p.Name != p.FirstName) continue;
             list.Add(p);
         }
         return list;

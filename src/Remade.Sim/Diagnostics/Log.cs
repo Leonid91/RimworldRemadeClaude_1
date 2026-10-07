@@ -81,6 +81,8 @@ public static class Log
 
     /// <summary>Optional sink for the console (e.g. Godot output). Must not call back into Log.</summary>
     public static Action<LogLevel, string> ConsoleSink;
+    /// <summary>Raised after an ERROR or FATAL entry was written (first line of the message). Must not call back into Log.</summary>
+    public static event Action<LogLevel, string> ErrorWritten;
 
     public static void Init(LogConfig cfg, string sessionId = null)
     {
@@ -308,6 +310,7 @@ public static class Log
                 _writer?.BaseStream.Flush();
                 if (_writer?.BaseStream is FileStream fs) fs.Flush(true);
             }
+            ErrorWritten?.Invoke(level, FirstLine(msg));
         }
         else
         {

@@ -417,19 +417,53 @@ public sealed class Planet
     /// </summary>
     public int Interpolate(Vector3 dir, int hint, float[] data, out float value)
     {
+        int t = InterpolationWeights(dir, hint, out var tiles, out var weights, out int n);
+        float v = 0;
+        for (int k = 0; k < n; k++) v += weights[k] * data[tiles[k]];
+        value = v;
+        return t;
+    }
+
+    /// <summary>Interpolates three per-tile arrays in one pass (one nearest-tile search).</summary>
+    public int Interpolate(Vector3 dir, int hint, float[] a, float[] b, float[] c, out float va, out float vb, out float vc)
+    {
+        int t = InterpolationWeights(dir, hint, out var tiles, out var weights, out int n);
+        va = vb = vc = 0;
+        for (int k = 0; k < n; k++)
+        {
+            float w = weights[k]; int i = tiles[k];
+            va += w * a[i]; vb += w * b[i]; vc += w * c[i];
+        }
+        return t;
+    }
+
+    [ThreadStatic] static int[] _wTiles;
+    [ThreadStatic] static float[] _wWeights;
+
+    /// <summary>
+    /// Normalised smooth weights of the nearest tile and its ring for a direction (cheap: dot products only,
+    /// weight = ((dot - cos R) / (1 - cos R))², R = 1.6 tile spacings).
+    /// </summary>
+    int InterpolationWeights(Vector3 dir, int hint, out int[] tiles, out float[] weights, out int n)
+    {
+        tiles = _wTiles ??= new int[8];
+        weights = _wWeights ??= new float[8];
         int t = Grid.Nearest(dir, hint);
-        float r = Grid.TileAngle * 1.6f;
-        float wsum = 0, vsum = 0;
+        float cosR = MathF.Cos(Grid.TileAngle * 1.6f);
+        float inv = 1f / (1f - cosR);
+        float wsum = 0;
+        n = 0;
         int s0 = Grid.NeighborStart[t], s1 = Grid.NeighborStart[t + 1];
         for (int k = s0 - 1; k < s1; k++)
         {
             int tile = k < s0 ? t : Grid.NeighborList[k];
-            float ang = MathF.Acos(Math.Clamp(Vector3.Dot(Grid.Centers[tile], dir), -1f, 1f));
-            float w = MathF.Max(0f, 1f - ang / r);
+            float w = MathF.Max(0f, (Vector3.Dot(Grid.Centers[tile], dir) - cosR) * inv);
             w *= w;
-            wsum += w; vsum += w * data[tile];
+            tiles[n] = tile; weights[n] = w; n++;
+            wsum += w;
         }
-        value = wsum > 0 ? vsum / wsum : data[t];
+        if (wsum <= 0) { tiles[0] = t; weights[0] = 1; n = 1; return t; }
+        for (int k = 0; k < n; k++) weights[k] /= wsum;
         return t;
     }
 }

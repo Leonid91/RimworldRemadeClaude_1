@@ -11,6 +11,9 @@
     <Version>0.1.0</Version>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- the simulation is performance-critical: always JIT-optimised, symbols kept for stack traces -->
+    <Optimize>true</Optimize>
+    <DebugType>portable</DebugType>
   </PropertyGroup>
 
   <!-- Embed the git commit into AssemblyInformationalVersion ("0.1.0+abc1234[-dirty]") for log headers. -->
