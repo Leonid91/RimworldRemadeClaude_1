@@ -251,3 +251,12 @@ Bug fixed
   * High plateaus were counted as hills and most land fell into the two hill classes.
 * Long colonist paths could take 20–60 ms in one tick on the new, more open maps
   * Plain A* flooded half the map whenever a river or lake forced a detour.
+
+## October 7th, 2026 - Mac and Windows launchers - Commit 10
+
+Added:
+* `play.sh` launcher for macOS (and Linux): finds Godot .NET in Applications, next to the game or on PATH, builds and starts the game
+* PLAY.md: how to install and open the game
+
+Changed:
+* `Play.bat` no longer needs the developer toolchain: it finds Godot next to the game, on PATH or in GODOT

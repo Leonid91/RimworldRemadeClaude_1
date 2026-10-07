@@ -7,3 +7,5 @@ obj/
 /logs/
 /test-results/
 *.tmp
+Godot_v4*/
+Godot_mono.app/

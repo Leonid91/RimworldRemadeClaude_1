@@ -8,10 +8,13 @@ hunt a deer and carry the meat home.**
 
 ## Play
 
+Install and launch: see [PLAY.md](PLAY.md).
+
 ```
 Play.bat                 builds and starts the game (main menu)
 Play.bat --windowed      in a window
 Play.bat --play          skip the menus: quick start on a default world
+./play.sh [same args]    macOS / Linux
 ```
 
 **New game:** Play → Select scenario (prepared, empty for now) → Create colonists (randomize anyone) → Generate world →
