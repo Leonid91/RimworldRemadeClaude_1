@@ -81,7 +81,7 @@ void fragment() {
 			float v = texture(overlay_map, dir).r;
 			oc = overlay_mode == 1 ? ramp_temperature(v) : ramp_precip(v);
 		}
-		col = mix(col, oc, overlay_strength);
+		col = mix(col, pow(oc, vec3(2.2)), overlay_strength); // ramps are authored in sRGB, like the UI legends
 	}
 	if (debug_mode == 1) {
 		float agree = dot(n_obj, dir);

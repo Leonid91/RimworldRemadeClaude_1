@@ -124,3 +124,12 @@ Bug fixed
   * The volumetric fog scattered the strongly orange low sun at a too high density.
 * "Mine" was never offered by the E key next to a rock
   * The reach test for rock faces was stricter than for other interactions.
+
+## October 6th, 2026 - Saturated planet overlays - Commit 6
+
+Changed:
+* Final integration run on the committed build: unit tests 66/66, part 1 13/13, part 2 10/10 scenarios (no logged errors)
+
+Bug fixed
+* Planet temperature and precipitation overlays looked pale and washed out
+  * The colour ramps are authored in sRGB but were used as linear colours in the globe shader.
