@@ -1,0 +1,543 @@
+Goal
+
+I want you to create me a game starting from the principle of what RimWorld has as gaming
+principles.
+
+For references look at the official Rimworld wiki: https://rimworldwiki.com/wiki/Main_Page
+
+Core technical concepts
+
+Path to the game files
+
+D:\Experiments
+You will put the new game in folder D:\Experiments\RimworldLikeClaude_1.
+
+Graphics
+
+It must be fake 3D rather than 2D graphics, kind of like 2.5 D. As an engine you can take
+Godot latest version and/or Blender (only if it is needed, just keep in mind that it exists) and
+or other tools that are needed. You are free to use the free assets and customise them. If
+they are not present you have permission to download them on my PC. You install them
+either in D:\Experiments or D:\Experiments\ExperimentTools, preferably in
+D:\Experiments\ExperimentTools unless they need to be in the game folder.
+
+I want as beautiful graphics as possible compared to the original game Rimworld, to make it
+enjoyable, atmospheric to build.
+
+It means beautiful atmospheric and realistic lighting, wind and sound reactive to the
+environment.
+
+Controls
+
+     Same as Rimworld overall but in addition to autonomous pawns and drafted pawns
+         you can control a selected pawn yourself.
+
+     You can use key "E" to interact with doors (close, open), and must be rebindable in
+         the settings. The same key also allows you to pick up objects on the ground or gather
+         stuff (like berries) IF and ONLY IF you are being in "direct control" mode.
+
+Quality assurance
+
+Unit testing
+
+Maintain and expand a suite of unit tests that are testing deterministic logic in isolation. This
+suite of unit tests must be run each time before you are going to integration tests to avoid
+launching the game for nothing. They must be run each time you finish a development I
+asked you.
+
+Global and integration testing
+
+No matter what they are called, after the unit tests, I want you to test the big parts of the
+game. There are two essential parts.
+
+1. Test in tests big parts and functions and ensure they run smoothly and give expected
+results. It is also the occasion to detect potential performance issues.
+2. Manage to actually launch the game via scripting or no matter how and observe the
+behavior through the suggested log file and no matter how else! If you can see the game
+and take screenshots do it too please! If we reach part 2, it means part 1 and unit tests are
+passing! Once the part 2 is successful you can hand it over to me so I can test myself. Of
+course your goal is to expect that I would find it perfect and we just iterate with a new
+requirement!
+
+Technical logging
+
+I expect you to produce a persistent log file that records errors and diagnostically useful
+events during my manual testing, your builds, and your autonomous runs.
+
+The logging system must capture as much useful diagnostic information as reasonably
+possible without noticeably impacting game performance.
+
+Each relevant log entry should include, where applicable:
+
+     Exact date and time, including seconds and preferably milliseconds.
+     Log severity: TRACE, DEBUG, INFO, WARNING, ERROR, FATAL.
+     Build/version identifier and Git commit if available.
+     Current game/session ID.
+     Current tick/frame number where relevant.
+     Subsystem, class, source file and function/method name.
+     Call stack/stack trace for errors and exceptions.
+     Exception type and full exception message.
+     Function execution duration when unusually slow or when an error occurs.
+     Important arguments passed to the failing function, excluding huge objects or
+
+         sensitive data.
+     Relevant game state surrounding the failure.
+     Current map/location identifier.
+     Relevant pawn/entity/object IDs.
+     Player or automated action immediately preceding the event.
+     State transitions, such as entering/leaving maps, loading/saving games, generating
+
+         worlds, spawning/despawning entities, etc.
+     Failed assertions and violated invariants.
+     Save/load errors and serialization/deserialization problems.
+     Resource loading failures.
+     Physics, pathfinding, AI, simulation and rendering errors when applicable.
+     Random/world seed when relevant for reproducing procedural-generation bugs.
+     Correlation/event ID so related operations can be followed through multiple functions.
+
+For serious errors, include enough surrounding context to reconstruct what happened
+immediately before the failure.
+
+The logger must flush critical/error entries immediately so crashes do not erase the useful
+information.
+
+Use rotating log files with maximum size/age limits so logging cannot indefinitely consume
+disk space.
+
+Normal gameplay logging must remain lightweight. Do not continuously serialize large game
+states, dump complete objects, produce stack traces for normal operations, or log every
+frame/tick.
+
+A more verbose diagnostic mode may be enabled during automated testing when additional
+information is useful.
+
+Do not use defensive programming to conceal bugs. Specifically avoid:
+
+     Empty or silent catch blocks.
+     Catching every exception with a generic catch unless it is logged and
+
+         rethrown/handled deliberately.
+     Returning arbitrary default values after unexpected failures.
+     Automatically repairing corrupted or invalid state without reporting it.
+     Excessive null-check/fallback chains that hide incorrect program state.
+     Retrying failed operations indefinitely.
+     Suppressing assertions merely to keep the game running.
+     Logging an error and then continuing as though the operation succeeded.
+     Duplicating the same error through many layers of the call stack.
+     Expensive logging inside tight loops, per-frame code, physics iterations, or large
+
+         entity loops.
+
+Use defensive checks where they protect against genuinely expected runtime conditions, but
+unexpected internal states should fail visibly, produce useful diagnostics, and make the
+underlying bug easy to identify rather than masking it.
+
+Prefer explicit invariants, assertions, validation at system boundaries, deterministic
+behaviour, and errors that fail close to their actual source.
+
+Development logging
+
+You will keep a unique .md file wher you will put and log each modification that was done in
+the following format.
+
+You start with the title of format
+CURRENT DATE IN FORMAT Month DD Year - SHORT DESCRIPTIVE TITLE (5 words
+maximum) - Commit number (iterative)
+
+For example : 
+
+October 10th, 2026 - Initial commit - Commit 1
+
+Then in bullet points you will sum up what things were added, changed and what bugs were
+fixed and under each bullet point of the bug reason of the bug in one phrase. For example:
+
+Added:
+* Weather system
+Changed:
+* Pawn pathing
+Bug fixed
+* Fire not burning in campfire
+
+And you will keep filling this file each time you do anything in the game.
+
+Also each entry = one real git commit!
+
+Efficiency
+
+Treat performance as a fundamental requirement throughout development, not something to
+address only at the end.
+
+Assume the final game should run fluidly on a machine roughly **half as powerful as mine**.
+
+Execution Speed and FPS
+
+Execution speed and stable FPS are paramount.
+
+The final goal is to support very large simulations, with hundreds of actively simulated
+entities locally and potentially thousands to millions represented at the planetary scale.
+
+Design systems from the beginning with scalability in mind. Use appropriate modern
+techniques, algorithms, data structures, parallelism, caching, batching, level-of-detail
+simulation, profiling, and other optimisation methods whenever they provide meaningful
+gains.
+
+Do not sacrifice the visual quality or simulation depth I request merely because an inefficient
+implementation cannot handle them. Look for a better implementation first.
+
+Use C++ wherever it provides substantial performance benefits, particularly for
+computationally intensive systems. Do not use C++ merely for the sake of using C++ when
+another approach performs sufficiently well and is easier to maintain.
+When working in C++, proactively account for the usual problems associated with native
+code, including memory, lifetime, concurrency, undefined behaviour and crashes. Use the
+appropriate modern debugging, profiling, diagnostic and testing tools available at the time
+rather than relying only on manual inspection.
+
+If a crash, slowdown, memory problem or instability appears, investigate its root cause using
+logs, profilers, debuggers, sanitizers or whatever equivalent tools are appropriate for the
+current environment.
+
+Avoid hiding problems with defensive workarounds that merely prevent the visible failure
+while leaving the underlying defect unresolved.
+
+Profile before making major low-level optimisations. Prioritise real bottlenecks rather than
+guessing which code is expensive.
+
+Prefer scalable architecture over micro-optimisations when the architectural improvement
+provides a larger gain.
+
+Memory
+
+Keep memory consumption efficient and avoid unnecessary allocations, duplication, retained
+objects and unnecessarily large data structures.
+
+Do not keep data in memory when it is not needed, and choose representations appropriate
+to the scale of the simulation.
+
+However, do not sacrifice substantial execution speed merely to save a small amount of
+memory. Runtime performance and stable FPS have higher priority unless memory
+consumption itself becomes a bottleneck.
+
+Continuously monitor both performance and memory usage during development and
+automated testing, and adapt the implementation when profiling shows that a different
+approach would perform better.
+
+Game foundations
+
+As it is the first step of our game generation I will give you very basic elements to code and
+generate and I expect you to focus on them as much as possible. Little but quality. Then we
+will iterate adding more and more content.
+
+Game menu/ Menu of the game
+
+Simple game menu allowing to select buttons:
+     Play
+          Select scenario (prepare interface for scenario selection and edition but for
+              now it will be empty)
+                    Select pawns (opens menu with pawns that describe in a wide and
+                        clear UI the pawns stats, below a screenshot with pawn stats).
+
+                        Inspire yourself from that. Below I will tell you which stat to generate
+                        as we will not use everything that Rimworld has and maybe add
+                        modifications, later.
+
+                              Generate a world screen where you select world parameters.
+                                  This screen is empty for now but keep it to prepare the UI for
+                                  existence. Only one button "generates" which generates a
+                                  default world .
+                                        The world is an image of the rotating globe filled with
+                                            hexagons (visible on hover). Clicking opens on the left
+                                            side terrain details. I will explain later what environment
+                                            we will have at the launch. And a button "Next". Next
+                                            allows you to select map sizes that are much greater
+                                            than original Rimworld map sizes.
+                                                  Once the map size is selected, in the same
+                                                      menu clicking the button "Play" loads the map.
+
+ Load game
+          Opens a menu with game saves, that allows you to select game saves,
+              meaning game saving functionality must exist!
+
+ Options
+ Exit
+Planet environment
+
+The core concept
+
+Planetary and Local Map Synchronization
+
+The planetary view and every playable location must be part of the same simulation system.
+
+What happens at the planetary level must also affect the currently selected playable location,
+whether that location is a colony, a caravan, a temporary encounter map, or any other
+playable map.
+
+The planetary view must therefore not be a separate abstract representation disconnected
+from local gameplay. Instead, it must represent the large-scale environmental state from
+which local maps derive their natural conditions.
+
+Planetary Environmental Views
+
+In addition to the normal biome map already present in the base game, the planetary view
+must provide buttons allowing the player to display additional environmental maps and
+heatmaps.
+
+At minimum, these must include:
+
+    1. Temperature Heatmap
+         Displays the geographical distribution of natural ambient temperature across the
+         entire planet.
+
+    2. Landscape / Elevation Map
+         Displays planetary elevation and terrain height, including lowlands, plains, hills,
+         mountain ranges, high plateaus, depressions, and other major elevation differences.
+
+    3. Moisture / Precipitation Map
+         Displays the distribution of environmental moisture and precipitation across the
+         planet.
+
+These maps are not merely visual overlays. Their values must correspond to actual
+environmental conditions used by the simulation.
+
+Connection Between Planetary Conditions and Playable Maps
+
+Planetary environmental values must directly influence every playable map located on the
+planet.
+
+For example, if the planetary temperature map indicates that a certain region currently has a
+natural ambient temperature of 32°C, a playable map located in that region must use
+approximately that temperature as its undisturbed outdoor environmental temperature.
+
+The same principle applies to moisture and precipitation.
+A region experiencing high precipitation or moisture at the planetary level must experience
+corresponding conditions on its playable maps, such as rainfall, snow, soil moisture,
+humidity, water accumulation, vegetation effects, or any other systems affected by
+precipitation.
+
+Changes occurring on the planetary environmental maps must therefore propagate to the
+relevant playable maps.
+
+Dynamic Planetary Conditions
+
+Temperature, moisture, and precipitation must be dynamic rather than permanently fixed
+values.
+
+They must evolve naturally during gameplay according to planetary conditions such as:
+
+     Seasons
+     Latitude
+     Time of year
+     Elevation
+     Weather systems
+     Regional climate
+     Natural climate variation
+
+The planetary environmental maps must update as these conditions change.
+
+Playable maps must remain synchronized with those changes.
+
+For example, if seasonal changes cause the planetary temperature of a region to fall from
+15°C to -5°C, playable maps located within that region must experience the corresponding
+seasonal cooling.
+
+Likewise, if a region enters a wetter seasonal period, the increased planetary precipitation
+must be reflected locally.
+
+Natural Ambient Temperature
+
+The temperature displayed on the planetary heatmap must represent the natural
+undisturbed ambient temperature of the region.
+
+It must not represent an absolute minimum or maximum temperature that cannot be
+exceeded.
+
+Local conditions may cause temperatures to become either higher or lower than the
+planetary ambient temperature.
+
+For example:
+
+     A refrigerated room may be much colder than the planetary ambient temperature.
+     A heated room may be significantly warmer.
+     A forest fire may create extremely high local temperatures.
+     Lava, magma, or hydrothermal vents may produce temperatures far above the
+         regional ambient temperature.
+
+     Artificial cooling systems may create environments far colder than surrounding
+         conditions.
+
+     Underground areas may have temperatures different from surface conditions.
+     Buildings and insulation may modify internal temperatures.
+
+The planetary heatmap therefore defines the baseline natural environmental
+temperature, not a hard temperature limit.
+
+In simplified terms:
+
+Planetary temperature = local natural outdoor baseline temperature
+
+Local simulation systems may then modify this value according to terrain, structures,
+weather, heat sources, cooling sources, underground conditions, and other environmental
+effects.
+
+Persistent Environmental Link
+
+Every playable map must retain its geographical relationship with the planetary simulation.
+
+A local map must know where on the planet it is located and retrieve the appropriate
+planetary environmental values for that position.
+
+This applies to:
+
+     Permanent colonies
+     Settlements
+     Caravans
+     Temporary encounter maps
+     Quest locations
+     Wilderness maps
+     Generated combat locations
+     Any other playable location situated on the planet
+
+This ensures that the player is always experiencing the same planet at different scales rather
+than switching between disconnected planetary and local simulations.
+
+The first available biomes
+
+On the map while representing logically where is happening to be each biome, for now they
+will not be playable other than temperate biome and they will be only visual representations
+of their future place.
+
+It means that in the interface any other biome than the temperate biome selected will not
+allow you to click on button play.
+
+Although the rivers must exist and be really rendered on local maps! Same for the sea
+coasts!
+Graphical representation of the globe map
+
+The screenshot above is a BAD representation of the globe. It is not visible what you select,
+it must not be triangles but hexagons but hexagons grid visible only on hover of an hexagon.
+Make its surface more pretty and much more smooth. Also rivers must be visible by the
+naked eye without any overlay!
+
+The local map
+
+Expected content:
+For the start do the minimum, I want
+
+     Generate one type oak trees, though while benign one typed those oak trees have
+         many variants in sizes and shapes, random;y distributed giving the appearance of
+         wilderness.
+
+     The mountain and elevation must be consistent for now only of one stone - the
+         granite, minable.
+
+     There should be one kind of animal, deers, randomly distributed.
+     Of course day night cycle! And different speeds.
+
+The pawn system
+
+An easy system to start with,
+Pawn UI
+When a pawn selected it opens you an UI that you will created inspired from real RimWorld
+liek here attached:
+
+
+But it will not contain everything that contains the real game Rimworld, for now...
+At the bottom of the UI you will add a button "Direct control" that when is pressed give the
+pawn to you into direct control. You can have direct control of only ONE pawn at the time.
+Direct control controls
+Simple WASD movements. Those keys must be directly remappable in the game menu,
+options PLUS have an option of auto-remap to an AZERTY keyboard.
+When the pawn is selected and you directly control it, you can use the key "E" to interact
+with world objects in the following way:
+
+     Pick up laying objects
+     Interact with environments such as gathering berries from the bushes and drink water
+
+         from the water surfaces, if many interactions possible you select them by rolling the
+         wheel of the mouse (the tiles and objects are highlighted and little text appears when
+         rolling the mouse wheel).
+     Same thing can be achieved with right click of the mouse and drop down action
+         menu
+     Combat:
+
+               Only and only you directly control a pawn, right mouse button is for aim and
+                   left to shoot or swing. While controlling the character, the aim is possible while
+                   moving (WASD). During the aim you will have a small HUD of the distance
+                   you can shoot or reach while swinging and the direction you shoot to. The
+                   direction is given by a small red line that goes to the distance limit during
+                   shooting while the the direction and the reach is given by the same small red
+                   line that goes to the distance of swinging.
+Bio tab
+So the first tab would be Bio that will have Skills that will be. Copy pasted the bio menu
+below:
+
+
+It will have the full name, sex as in Rimworld (Female or Male), biological age first,
+chronological age in parenthesis if they are not the same.
+
+It will not have the faction attribute, religion attribute, color, etc.
+It will have traits with traits being random traits. Do not focus on them, as well it will be
+expanded later.
+
+Concerning skills:
+
+    1. Shooting
+    2. Melee
+    3. Construction
+    4. Mining
+    5. Cooking
+    6. Plants
+    7. Animals
+    8. Crafting
+    9. Artistic
+    10.Medical
+    11.Social
+    12.Intellectual
+They will range from 0 to 20. For now they are just a display menu and will not have any
+effects. But this is temporary, we will rework them later.
+Equipment tab
+
+The next tab is called pawn equipment.
+It will be a mix of Project Zomboid, Stalker and Rimworld equipment system, meaning it will
+have on one side an image of a human with subdivisions in body parts like in Project
+Zomboid. So first part the layer representation and representing what is equipped. I copy
+past image below:
+
+Of course the body will have many more subdivisions! Like the exact one as in rimworld
+meaning the screenshot below:
+
+And as we discuss equipment it will have layers (tabs on top showing different layers on the
+same human image):
+
+     Skin
+     Middle
+     Outer
+     Headgear
+     Eyes
+     Belt
+This human image will showcase what is equipped in each case and on which layer so it is
+clear to see what you can and cannot equip.
+The second part is the Stalker/Project Zomboid like inventory, meaning a second window on
+the right of the human structure having a case like separation of what is in the inventory,
+showcasing both the encumbrance and the weight. Refer to the real human dat to see how
+much a human can carry in real life na represent it in this inventory.
+Needs tab
+
+                                                                                                                             
+Look at the screenshot from the actual game!
+
+Same Informations but for now having ONLY and ONLY Food, Thirst and Sleep needs.
+
+They must decay during the day as much as they would decay in real life so base yourself
+on this. However they do not have YET any effects. We will see that later.
+Health tab
+We are back to our human representation tab. This body is subdivided as each body part
+highlighted, shows the different highlighted organs (can be multiple like brain, eyes,
+mouth/jaw, nose in case of the head) and their condition (from 0% to 100%).
+You will have the tab "Operations" and a button "Add bill" which opens an empty drawdown
+for the moment.
+
+The goal of the first trial of the game
+
+I can arrive at a map. Control my pawn. Pick up a bow. Shoot a deer. The deer drops meant.
+Pick up meat. That is it.
+
