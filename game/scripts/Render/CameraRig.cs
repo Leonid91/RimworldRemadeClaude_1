@@ -6,24 +6,28 @@ namespace Remade.Game.Render;
 /// <summary>
 /// RimWorld-style overhead camera: a focus point on the ground, a distance (zoom) and a yaw. The pitch steepens as
 /// you zoom out. Pans with the move keys / arrows / middle mouse / screen edges; follows a colonist under direct
-/// control. Everything is smoothed.
+/// control. Everything is smoothed. A subtle tilt-shift depth of field (from the first prototype) keeps the eye on the
+/// focus point.
 /// </summary>
 public partial class CameraRig : Node3D
 {
     public readonly Camera3D Camera;
     public Vector3 Focus;
-    public float Distance = 38f, Yaw;
-    public float MinDistance = 7f, MaxDistance = 170f;
+    public float Distance = 34f, Yaw;
+    public float MinDistance = 7f, MaxDistance = 160f;
+    public bool DofEnabled = true;
+    readonly CameraAttributesPractical _attr;
     public Vector2 MapSize;
     public Func<float, float, float> HeightAt;
     Vector3 _focusTarget;
-    float _distTarget = 38f, _yawTarget;
+    float _distTarget = 34f, _yawTarget;
     public bool Follow;
     public Vector3 FollowTarget;
 
     public CameraRig()
     {
-        Camera = new Camera3D { Fov = 40, Near = 0.3f, Far = 900f, Current = true };
+        _attr = new CameraAttributesPractical { DofBlurFarEnabled = true, DofBlurNearEnabled = true, DofBlurAmount = 0.045f };
+        Camera = new Camera3D { Fov = 34, Near = 0.3f, Far = 900f, Current = true, Attributes = _attr };
         AddChild(Camera);
     }
 
@@ -66,11 +70,17 @@ public partial class CameraRig : Node3D
         Yaw = Mathf.Lerp(Yaw, _yawTarget, k);
         // closer → more oblique view, further → more top-down
         float t = Mathf.Clamp((Distance - MinDistance) / (MaxDistance - MinDistance), 0f, 1f);
-        float pitch = Mathf.DegToRad(Mathf.Lerp(42f, 68f, Mathf.Sqrt(t)));
+        float pitch = Mathf.DegToRad(Mathf.Lerp(44f, 70f, Mathf.Pow(t, 0.6f)));
         var back = new Vector3(Mathf.Sin(Yaw), 0, Mathf.Cos(Yaw));
         var pos = Focus + back * Mathf.Cos(pitch) * Distance + Vector3.Up * Mathf.Sin(pitch) * Distance;
         Camera.GlobalPosition = pos;
         Camera.LookAt(Focus, Vector3.Up);
+        _attr.DofBlurFarEnabled = _attr.DofBlurNearEnabled = DofEnabled;
+        _attr.DofBlurFarDistance = Distance * 1.35f;
+        _attr.DofBlurFarTransition = Distance * 0.9f;
+        _attr.DofBlurNearDistance = Distance * 0.62f;
+        _attr.DofBlurNearTransition = Distance * 0.35f;
+        _attr.DofBlurAmount = Mathf.Lerp(0.045f, 0.018f, t);
     }
 
     /// <summary>Ground point under a screen position (ray against the horizontal plane at the focus height).</summary>

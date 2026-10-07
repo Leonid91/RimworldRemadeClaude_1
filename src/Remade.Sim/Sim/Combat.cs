@@ -13,14 +13,13 @@ public sealed partial class GameSim
     public const float ArrowSpeed = 34f / 60f; // cells per tick (≈ 34 m/s at 1x)
 
     /// <summary>Range of the pawn's current attack: the bow's range with arrows, else melee reach.</summary>
-    public static float AttackRange(Pawn p) => p.HasRangedWeapon && p.Arrows > 0 ? p.Weapon.Def.Range : FistReach;
+    public static float AttackRange(Pawn p) => p.HasRangedWeapon && p.Arrows > 0 ? p.Held.Def.Range : FistReach;
 
     /// <summary>Angular spread (radians, 1 sigma) of a shot: better shooters are steadier; moving makes it worse.</summary>
     public static float ShotSpread(Pawn p, bool moving)
     {
         float deg = 6.5f - p.Skills[(int)SkillId.Shooting] * 0.24f;
-        if (p.HasTrait("careful_shooter")) deg *= 0.75f;
-        if (p.HasTrait("trigger_happy")) deg *= 1.3f;
+        deg *= p.StatFactor(Stat.ShotSpread);
         if (moving) deg += 3f;
         return MathF.Max(0.6f, deg) * MathF.PI / 180f;
     }
@@ -37,42 +36,68 @@ public sealed partial class GameSim
             float spread = ShotSpread(p, moving);
             float angle = MathF.Atan2(dir.Y, dir.X) + Rng.Gaussian() * spread;
             var d = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
-            float range = p.Weapon.Def.Range;
+            float range = p.Held.Def.Range;
             Projectiles.Add(new Projectile
             {
                 Start = p.Position + d * 0.45f, Pos = p.Position + d * 0.45f, Dir = d, Speed = ArrowSpeed,
-                MaxDist = range * Rng.Range(1.0f, 1.12f), Damage = p.Weapon.Def.Damage * Rng.Range(0.85f, 1.25f), Shooter = p,
+                MaxDist = range * Rng.Range(1.0f, 1.12f), Damage = p.Held.Def.Damage * Rng.Range(0.85f, 1.25f), Shooter = p,
             });
-            p.WeaponCooldown = (int)p.Weapon.Def.Cooldown;
-            if (p.HasTrait("trigger_happy")) p.WeaponCooldown = (int)(p.WeaponCooldown * 0.75f);
+            p.WeaponCooldown = (int)(p.Held.Def.Cooldown * p.StatFactor(Stat.AimTime));
             p.Anim = PawnAnim.Shoot; p.AnimTime = 0;
             Events.Add(new SimEvent(SimEventKind.ArrowFired, p.Position, null, p.Id));
             Log.Debug($"{p.Name} shoots: aim {MathF.Atan2(dir.Y, dir.X) * 57.3f:F0}° actual {angle * 57.3f:F0}° spread {spread * 57.3f:F1}°, arrows left {p.Arrows}");
             return;
         }
 
-        // melee: fists, or a bow used as a club
+        // melee: fists, or whatever is held used as a club; hits deer and people alike
         float reach = FistReach;
-        float dmg = p.Weapon != null ? 8f : FistDamage;
-        if (p.HasTrait("brawler")) dmg *= 1.3f;
+        float dmg = (p.Held?.Def.Kind == ThingKind.Weapon ? 8f : FistDamage) * p.StatFactor(Stat.MeleeDamage);
         p.WeaponCooldown = 55;
         p.Anim = PawnAnim.Swing; p.AnimTime = 0;
         Events.Add(new SimEvent(SimEventKind.Swing, p.Position, null, p.Id));
-        float hitChance = 0.55f + p.Skills[(int)SkillId.Melee] * 0.02f;
-        Animal best = null; float bestD = float.MaxValue;
+        float hitChance = MathF.Min(0.95f, (0.55f + p.Skills[(int)SkillId.Melee] * 0.02f) * p.StatFactor(Stat.MeleeHitChance));
+        float cone = MathF.Cos(50f * MathF.PI / 180f);
+        Animal bestA = null; Pawn bestP = null; float bestD = float.MaxValue;
         foreach (var a in Animals)
         {
             if (a.Dead) continue;
             Vector2 to = a.Position - p.Position;
             float dist = to.Length() - Animal.Radius * a.Size;
-            if (dist > reach) continue;
-            if (to.LengthSquared() > 1e-4f && Vector2.Dot(Vector2.Normalize(to), dir) < MathF.Cos(50f * MathF.PI / 180f)) continue;
-            if (dist < bestD) { bestD = dist; best = a; }
+            if (dist > reach || (to.LengthSquared() > 1e-4f && Vector2.Dot(Vector2.Normalize(to), dir) < cone)) continue;
+            if (dist < bestD) { bestD = dist; bestA = a; }
         }
-        if (best == null) return;
-        if (!Rng.Chance(hitChance)) { Log.Debug($"{p.Name} swings at {best} and misses"); Spook(best, p.Position); return; }
-        HitAnimal(best, dmg * Rng.Range(0.8f, 1.2f), p.Position, bleed: 0.6f);
-        Events.Add(new SimEvent(SimEventKind.MeleeHit, best.Position, null, best.Id));
+        foreach (var o in Pawns)
+        {
+            if (o == p || o.Dead) continue;
+            Vector2 to = o.Position - p.Position;
+            float dist = to.Length() - Pawn.Radius;
+            if (dist > reach || (to.LengthSquared() > 1e-4f && Vector2.Dot(Vector2.Normalize(to), dir) < cone)) continue;
+            if (dist < bestD) { bestD = dist; bestP = o; bestA = null; }
+        }
+        if (bestA == null && bestP == null) return;
+        Vector2 targetPos = bestP?.Position ?? bestA.Position;
+        if (!Rng.Chance(hitChance))
+        {
+            Log.Debug($"{p.Name} swings and misses");
+            if (bestA != null) Spook(bestA, p.Position);
+            return;
+        }
+        if (bestP != null) HitPawn(bestP, dmg * Rng.Range(0.8f, 1.2f), p, bleed: 0.4f, "punch");
+        else HitAnimal(bestA, dmg * Rng.Range(0.8f, 1.2f), p.Position, bleed: 0.6f);
+        Events.Add(new SimEvent(SimEventKind.MeleeHit, targetPos, null, bestP?.Id ?? bestA.Id));
+    }
+
+    /// <summary>Wounds a colonist (arrow or blow). Damage is scaled by their Damage taken stat (Tough, Delicate).</summary>
+    void HitPawn(Pawn victim, float damage, Pawn attacker, float bleed, string what)
+    {
+        damage *= victim.StatFactor(Stat.DamageTaken);
+        int part = victim.Health.Body.PickHitPart(ref Rng);
+        string partName = victim.Health.Body[part].Name.ToLowerInvariant();
+        bool died = victim.Health.Damage(part, damage, Tick, bleed);
+        string by = attacker != null ? $"{attacker.Name}'s {what}" : $"A {what}";
+        Message($"{by} hits {victim.Name} in the {partName}" + (died ? $" — {victim.Name} is killed." : "."), victim.Position);
+        Log.Info($"{victim} hit in the {partName} for {damage:F1} by {attacker?.ToString() ?? "-"} ({what}); health {victim.Health.Summary:P0}{(died ? ", killed: " + victim.Health.DeathCause : "")}");
+        if (died) Die(victim);
     }
 
     void TickProjectiles()
@@ -98,6 +123,13 @@ public sealed partial class GameSim
             float t = SegmentCircle(a, b, an.Position, Animal.Radius * an.Size);
             if (t >= 0 && t < hitT) { hitT = t; hit = an; }
         }
+        Pawn hitPawn = null;
+        foreach (var o in Pawns)
+        {
+            if (o.Dead || o == pr.Shooter) continue;
+            float t = SegmentCircle(a, b, o.Position, Pawn.Radius + 0.05f);
+            if (t >= 0 && t < hitT) { hitT = t; hitPawn = o; hit = null; }
+        }
         // solid cells and tree trunks along the segment
         float blockT = float.MaxValue; bool tree = false;
         int samples = Math.Max(1, (int)MathF.Ceiling(step / 0.25f));
@@ -111,6 +143,14 @@ public sealed partial class GameSim
                 && pr.Traveled > 1.5f && Rng.Chance(0.5f)) { blockT = t; tree = true; break; }
         }
 
+        if (hitPawn != null && hitT * step <= blockT * step)
+        {
+            pr.Done = true;
+            Vector2 at = Vector2.Lerp(a, b, hitT);
+            Events.Add(new SimEvent(SimEventKind.ArrowHit, at, null, hitPawn.Id));
+            HitPawn(hitPawn, pr.Damage, pr.Shooter, bleed: 2.2f, "arrow");
+            return;
+        }
         if (hit != null && hitT * step <= blockT * step)
         {
             pr.Done = true;
@@ -199,7 +239,7 @@ public sealed partial class GameSim
         var target = j.TargetAnimal;
         if (target == null || target.Dead) { EndJob(p); p.Anim = PawnAnim.Idle; return; }
         bool ranged = j.Kind == JobKind.Hunt && p.HasRangedWeapon && p.Arrows > 0;
-        float range = ranged ? p.Weapon.Def.Range * 0.85f : FistReach * 0.9f;
+        float range = ranged ? p.Held.Def.Range * 0.85f : FistReach * 0.9f;
         float dist = Vector2.Distance(p.Position, target.Position);
         if (dist > range || (ranged && !LineOfSight(p.Position, target.Position)))
         {
@@ -226,7 +266,7 @@ public sealed partial class GameSim
         p.Aiming = true;
         p.Anim = PawnAnim.Aim;
         if (j.Stage == 0) { j.Stage = 1; j.Timer = 0; }
-        if (++j.Timer < (ranged ? 45 : 10) || p.WeaponCooldown > 0) return;
+        if (++j.Timer < (ranged ? (int)(45 * p.StatFactor(Stat.AimTime)) : 10) || p.WeaponCooldown > 0) return;
         // lead the target a little
         Vector2 lead = ranged ? target.Position + target.Velocity * (dist / ArrowSpeed) * 0.8f : target.Position;
         Attack(p, lead - p.Position, moving: false, forceMelee: !ranged);

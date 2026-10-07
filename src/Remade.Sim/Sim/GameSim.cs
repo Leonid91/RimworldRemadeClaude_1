@@ -123,12 +123,9 @@ public sealed partial class GameSim
     static int MaxIdOf(Pawn p)
     {
         int m = p.Id;
-        foreach (var a in p.Apparel)
-        {
-            m = Math.Max(m, a.Id);
-            if (a.Contents != null) foreach (var e in a.Contents.Entries) m = Math.Max(m, e.Item.Id);
-        }
-        if (p.Weapon != null) m = Math.Max(m, p.Weapon.Id);
+        foreach (var a in p.Apparel) m = Math.Max(m, a.Id);
+        foreach (var e in p.Inventory.Entries) m = Math.Max(m, e.Item.Id);
+        if (p.Held != null) m = Math.Max(m, p.Held.Id);
         return m;
     }
 
@@ -163,6 +160,10 @@ public sealed partial class GameSim
 
     /// <summary>Nearest standable cell centre to a point, searching outward up to a radius.</summary>
     public Vector2 FindStandableNear(Vector2 p, int radius)
+        => TryFindStandableNear(p, radius, out var s) ? s : throw new InvalidOperationException($"No standable cell within {radius} of {p}");
+
+    /// <summary>Nearest dry, open cell (ring by ring); false when there is none within the radius (all water or rock).</summary>
+    public bool TryFindStandableNear(Vector2 p, int radius, out Vector2 spot)
     {
         int cx = (int)p.X, cy = (int)p.Y;
         for (int r = 0; r <= radius; r++)
@@ -173,9 +174,10 @@ public sealed partial class GameSim
                     int x = cx + dx, y = cy + dy;
                     if (!Map.InBounds(x, y)) continue;
                     int c = Map.Index(x, y);
-                    if (!Map.Blocked(c) && !Map.TerrainAt(c).Water && Map.Plants[c] != Plant.Oak) return r == 0 ? p : LocalMap.CellCenter(x, y);
+                    if (!Map.Blocked(c) && !Map.TerrainAt(c).Water && Map.Plants[c] != Plant.Oak) { spot = r == 0 ? p : LocalMap.CellCenter(x, y); return true; }
                 }
-        throw new InvalidOperationException($"No standable cell within {radius} of {p}");
+        spot = default;
+        return false;
     }
 
     // ------------------------------------------------------------------ items
@@ -333,11 +335,19 @@ public sealed partial class GameSim
     internal Dictionary<int, int> AutoDoorsSnapshot() => new(_autoDoors);
     internal void RestoreAutoDoor(int cell, int timer) => _autoDoors[cell] = timer;
 
-    /// <summary>AI pawns open doors on their way and the door swings shut behind them.</summary>
+    /// <summary>
+    /// AI pawns open doors on their way and the door swings shut behind them. A door someone deliberately left open
+    /// (opened with E / the menu) stays open: only doors opened here are scheduled to close.
+    /// </summary>
     internal void AutoOpenDoor(int cell)
     {
-        if (!Map.DoorOpen[cell]) { Map.SetDoor(cell, true); Events.Add(new SimEvent(SimEventKind.DoorToggled, Map.CellCenter(cell), "open", cell)); }
-        _autoDoors[cell] = 40;
+        if (!Map.DoorOpen[cell])
+        {
+            Map.SetDoor(cell, true);
+            Events.Add(new SimEvent(SimEventKind.DoorToggled, Map.CellCenter(cell), "open", cell));
+            _autoDoors[cell] = 40;
+        }
+        else if (_autoDoors.ContainsKey(cell)) _autoDoors[cell] = 40;
     }
 
     public void Message(string text, Vector2 pos)

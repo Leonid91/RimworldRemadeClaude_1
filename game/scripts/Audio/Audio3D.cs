@@ -22,6 +22,8 @@ public partial class Audio3D : Node3D
 
     AudioStreamPlayer _wind, _rain, _water, _leaves, _crickets;
     readonly List<AudioStreamPlayer3D> _pool = new();
+    readonly List<AudioStreamPlayer> _pool2D = new();
+    Vector3 _focus;
     double _birdTimer = 2;
     Rng _rng = new(1234); // mutable struct: must not be readonly or it never advances
     GameSim _sim;
@@ -64,6 +66,29 @@ public partial class Audio3D : Node3D
             AddChild(p);
             _pool.Add(p);
         }
+        for (int i = 0; i < 4; i++)
+        {
+            var p = new AudioStreamPlayer { Bus = "Effects" };
+            AddChild(p);
+            _pool2D.Add(p);
+        }
+    }
+
+    /// <summary>
+    /// Non-positional one-shot for sounds the player must always hear clearly (a bow shot): the overhead camera is
+    /// tens of metres away, so 3D attenuation would bury them. Fades only with the distance from the camera focus.
+    /// </summary>
+    public void PlayNear(string name, Vector3 at, float volumeDb = 0, float pitch = 1)
+    {
+        if (!Bank.TryGetValue(name, out var s)) throw new KeyNotFoundException($"No sound '{name}'");
+        AudioStreamPlayer free = null;
+        foreach (var p in _pool2D) if (!p.Playing) { free = p; break; }
+        free ??= _pool2D[_rng.Range(0, _pool2D.Count)];
+        float d = new Vector2(at.X - _focus.X, at.Z - _focus.Z).Length();
+        free.Stream = s;
+        free.VolumeDb = volumeDb - Mathf.Clamp(d * 0.25f, 0f, 24f);
+        free.PitchScale = pitch;
+        free.Play();
     }
 
     AudioStreamPlayer Loop(string name)
@@ -77,6 +102,7 @@ public partial class Audio3D : Node3D
 
     public void Update(float dt, Vector3 focus, Vector3 listener, float daylight)
     {
+        _focus = focus;
         var w = _sim.Weather;
         Position = focus;
         float wind = Mathf.Clamp(w.WindSpeed / 14f, 0f, 1f);
@@ -142,7 +168,7 @@ public partial class Audio3D : Node3D
         var at = toWorld(e.Pos) + new Vector3(0, 1f, 0);
         switch (e.Kind)
         {
-            case SimEventKind.ArrowFired: Play("bow", at, -2, _rng.Range(0.95f, 1.05f)); break;
+            case SimEventKind.ArrowFired: PlayNear("bow", at, 0, _rng.Range(0.96f, 1.04f)); break;
             case SimEventKind.ArrowHit: Play("thud", at, 0, _rng.Range(0.9f, 1.1f)); break;
             case SimEventKind.ArrowMissed: Play(e.Text == "ground" ? "thud_soft" : "tok", at, -4, _rng.Range(0.9f, 1.15f)); break;
             case SimEventKind.DoorToggled: Play("door", at, -3, e.Text == "open" ? 1f : 0.85f); break;
@@ -254,23 +280,19 @@ public partial class Audio3D : Node3D
         return s;
     }
 
+    /// <summary>Flowing water: band-passed noise with a slow, irregular swell (no bubbling blips).</summary>
     static float[] Water(ref Rng r, float sec)
     {
-        var s = Buf(sec); float lp = 0, bp = 0, bub = 0, bubF = 0, bubPh = 0;
+        var s = Buf(sec); float lp = 0, bp = 0, env = 0;
         for (int i = 0; i < s.Length; i++)
         {
             float n = r.NextFloat() * 2 - 1;
             float v = Lp(ref lp, n, 0.12f);
             v -= Lp(ref bp, v, 0.01f);
-            // gurgles: short rising sine blips
-            if (bub <= 0 && r.Chance(0.0009f)) { bub = 1; bubF = r.Range(250f, 700f); }
-            if (bub > 0)
-            {
-                bubPh += (bubF * (1.6f - bub * 0.6f)) / Rate * MathF.Tau;
-                v += MathF.Sin(bubPh) * bub * 0.35f;
-                bub -= 1f / (Rate * 0.06f);
-            }
-            s[i] = v;
+            float t = i / (float)Rate;
+            float target = 0.75f + 0.25f * MathF.Sin(t * MathF.Tau / sec * 2f) * MathF.Sin(t * MathF.Tau / sec * 3f + 1f);
+            env = Lp(ref env, target, 0.0005f);
+            s[i] = v * env;
         }
         return s;
     }
@@ -341,19 +363,32 @@ public partial class Audio3D : Node3D
         return s;
     }
 
+    /// <summary>
+    /// Bow release: a sharp string slap (a pitch-dropping twang with harmonics), the knock of the limbs as they stop,
+    /// and the arrow's short whoosh leaving.
+    /// </summary>
     static float[] Bow(ref Rng r)
     {
-        var s = Buf(0.6f); float lp = 0;
+        var s = Buf(0.75f); float lp = 0, wlp = 0, whp = 0;
         for (int i = 0; i < s.Length; i++)
         {
             float t = i / (float)Rate;
-            float env = MathF.Exp(-t * 9f);
-            float f = 140f * (1f + 0.4f * MathF.Exp(-t * 30f));
-            float str = MathF.Sin(t * f * MathF.Tau) + 0.5f * MathF.Sin(t * f * 2.01f * MathF.Tau) + 0.25f * MathF.Sin(t * f * 3.03f * MathF.Tau);
-            float n = Lp(ref lp, r.NextFloat() * 2 - 1, 0.3f) * MathF.Exp(-t * 40f);
-            s[i] = (str * 0.6f + n * 1.2f) * env;
+            // twang: fast attack, the string's pitch drops as it settles
+            float f = 165f * (1f + 0.9f * MathF.Exp(-t * 45f));
+            float twang = (MathF.Sin(t * f * MathF.Tau) + 0.6f * MathF.Sin(t * f * 2.02f * MathF.Tau) + 0.35f * MathF.Sin(t * f * 3.05f * MathF.Tau)
+                           + 0.2f * MathF.Sin(t * f * 4.1f * MathF.Tau)) * MathF.Exp(-t * 7f) * MathF.Min(1f, t * 900f);
+            // slap: a click of broadband noise in the first milliseconds
+            float slap = Lp(ref lp, r.NextFloat() * 2 - 1, 0.5f) * MathF.Exp(-t * 90f) * 2.2f;
+            // limb knock: a low, short wooden thump
+            float knock = MathF.Sin(t * 95f * MathF.Tau) * MathF.Exp(-t * 35f) * 0.9f;
+            // whoosh: band-passed noise swelling and fading over a quarter of a second
+            float n = r.NextFloat() * 2 - 1;
+            float w = Lp(ref wlp, n, 0.18f);
+            w -= Lp(ref whp, w, 0.04f);
+            float wEnv = MathF.Max(0f, MathF.Sin(MathF.Min(1f, MathF.Max(0f, (t - 0.02f) / 0.3f)) * MathF.PI));
+            s[i] = twang * 0.7f + slap + knock + w * wEnv * 1.6f;
         }
-        Normalize(s, 0.8f);
+        Normalize(s, 0.95f);
         return s;
     }
 

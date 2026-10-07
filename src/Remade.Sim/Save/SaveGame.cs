@@ -42,7 +42,8 @@ public sealed class SaveHeader
 public static class SaveGame
 {
     const uint Magic = 0x56535252; // "RRSV"
-    public const int CurrentVersion = 1;
+    /// <summary>2: single colonist inventory + hands slot, trait set with stat effects. Version 1 saves are not readable.</summary>
+    public const int CurrentVersion = 2;
 
     // ------------------------------------------------------------------ write
 
@@ -186,8 +187,11 @@ public static class SaveGame
         w.Write(p.Needs.Food); w.Write(p.Needs.Thirst); w.Write(p.Needs.Rest);
         w.Write(p.Apparel.Count);
         foreach (var a in p.Apparel) WriteItem(w, a);
-        w.Write(p.Weapon != null);
-        if (p.Weapon != null) WriteItem(w, p.Weapon);
+        w.Write(p.Held != null);
+        if (p.Held != null) WriteItem(w, p.Held);
+        w.Write(p.Inventory.W); w.Write(p.Inventory.H);
+        w.Write(p.Inventory.Entries.Count);
+        foreach (var e in p.Inventory.Entries) { w.Write(e.X); w.Write(e.Y); w.Write(e.Rotated); WriteItem(w, e.Item); }
         WriteV(w, p.Position); w.Write(p.Facing); w.Write((byte)p.Mode);
     }
 
@@ -248,7 +252,7 @@ public static class SaveGame
             uint magic = r.ReadUInt32();
             if (magic != Magic) throw new SaveFormatException($"{path}: not a save file (magic 0x{magic:X8})");
             int version = r.ReadInt32();
-            if (version < 1 || version > CurrentVersion) throw new SaveFormatException($"{path}: unsupported save version {version} (this build reads 1..{CurrentVersion})");
+            if (version != CurrentVersion) throw new SaveFormatException($"{path}: save version {version} is not supported by this build (it reads version {CurrentVersion}); saves from earlier versions cannot be loaded");
             return new SaveHeader
             {
                 Version = version, ColonyName = r.ReadString(), SavedUtc = new DateTime(r.ReadInt64(), DateTimeKind.Utc), Tick = r.ReadInt64(),
@@ -410,8 +414,8 @@ public static class SaveGame
 
     static Item FindCarried(Pawn p, int id)
     {
-        if (p.Weapon?.Id == id) return p.Weapon;
-        foreach (var g in p.Containers) foreach (var e in g.Entries) if (e.Item.Id == id) return e.Item;
+        if (p.Held?.Id == id) return p.Held;
+        foreach (var e in p.Inventory.Entries) if (e.Item.Id == id) return e.Item;
         return null;
     }
 
@@ -465,7 +469,19 @@ public static class SaveGame
         p.Needs.Food = r.ReadSingle(); p.Needs.Thirst = r.ReadSingle(); p.Needs.Rest = r.ReadSingle();
         int apparel = r.ReadInt32();
         for (int i = 0; i < apparel; i++) p.Wear(ReadItem(r));
-        if (r.ReadBoolean()) p.Weapon = ReadItem(r);
+        if (r.ReadBoolean()) p.Held = ReadItem(r);
+        int iw = r.ReadInt32(), ih = r.ReadInt32();
+        if (iw != Pawn.InventoryColumns || ih < 1 || ih > 20) throw new InvalidDataException($"pawn {p.Id}: inventory {iw}x{ih}");
+        p.CreateInventory(ih);
+        int n = r.ReadInt32();
+        for (int i = 0; i < n; i++)
+        {
+            int x = r.ReadInt32(), y = r.ReadInt32(); bool rot = r.ReadBoolean();
+            var it = ReadItem(r);
+            var e = new GridEntry { Item = it, X = x, Y = y, Rotated = rot };
+            if (!p.Inventory.Fits(x, y, e.W, e.H)) throw new InvalidDataException($"pawn {p.Id}: {it} does not fit at {x},{y}");
+            p.Inventory.Place(it, x, y, rot);
+        }
         p.Position = ReadV(r); p.Facing = r.ReadSingle(); p.Mode = (ControlMode)r.ReadByte();
         return p;
     }

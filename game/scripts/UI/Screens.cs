@@ -90,7 +90,6 @@ public partial class MainMenu : Control
         col.AddChild(title);
         var sub = UiKit.Label("R  E  M  A  D  E", 22, UiKit.Accent, align: HorizontalAlignment.Center);
         col.AddChild(sub);
-        col.AddChild(UiKit.Label("a colony at the edge of a living world", 17, UiKit.Muted, align: HorizontalAlignment.Center));
         col.AddChild(UiKit.Spacer(0, 44));
         foreach (var (text, act) in new (string, Action)[]
                  {

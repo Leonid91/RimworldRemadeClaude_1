@@ -8,8 +8,9 @@ namespace Remade.Game.Render;
 
 /// <summary>
 /// Procedural models. Everything faces −Z, stands on y = 0, 1 unit = 1 metre.
-/// Oaks: 12 variants of 4 archetypes (broad, tall, young, gnarled), each with a detailed and a low LOD mesh, two
-/// surfaces (bark, leaves). Deer: a vertex-animated mesh (bone id in UV2.x). Items: bow, arrows, venison, berries…
+/// Oaks (first prototype's model): a short trunk, 4–6 limbs and round clusters of many painted leaf cards, each
+/// variant with a detailed and a low LOD mesh, two surfaces (bark, leaves); per-tree leaf tint comes from the
+/// MultiMesh custom data. Deer: a vertex-animated mesh (bone id in UV2.x). Items: bow, arrows, venison, berries…
 /// </summary>
 public static class Models
 {
@@ -26,160 +27,173 @@ public static class Models
     static ShaderMaterial MakeBark()
     {
         var m = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/bark.gdshader") };
-        m.SetShaderParameter("bark", ProcTextures.Bark);
+        m.SetShaderParameter("noise_tex", ProcTextures.Noise);
         return m;
     }
 
     static ShaderMaterial MakeLeaves()
     {
         var m = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/foliage.gdshader") };
-        m.SetShaderParameter("leaves", ProcTextures.Leaves);
+        m.SetShaderParameter("leaf_tex", ProcTextures.Leaves);
+        m.SetShaderParameter("noise_tex", ProcTextures.Noise);
         return m;
     }
+
+    /// <summary>Oak leaf tint (sRGB) for the MultiMesh custom data; alpha = sway phase × 0.5.</summary>
+    public static readonly Color OakLeaf = new(0.32f, 0.5f, 0.14f);
+    public static readonly Color BushLeaf = new(0.2f, 0.36f, 0.14f);
 
     // ------------------------------------------------------------------ oak
 
     public static Tree Oak(int variant)
     {
-        var rng = new Rng(9000UL + (ulong)variant * 7919UL);
-        int arche = variant % 4;
-        float H = arche switch { 0 => rng.Range(6f, 8f), 1 => rng.Range(8f, 10f), 2 => rng.Range(4f, 5.5f), _ => rng.Range(5.5f, 7f) };
-        float crown = arche switch { 0 => H * 0.42f, 1 => H * 0.3f, 2 => H * 0.3f, _ => H * 0.5f };
-        float trunkR = arche switch { 0 => 0.28f, 1 => 0.26f, 2 => 0.13f, _ => 0.36f } * rng.Range(0.85f, 1.15f);
-        float trunkTop = H * (arche == 3 ? 0.4f : arche == 1 ? 0.6f : 0.5f);
-        var tree = new Tree { Height = H, Crown = crown };
-        var crownCenter = new Vector3(0, trunkTop + (H - trunkTop) * 0.45f, 0);
-        var r1 = rng;
-        tree.Detail = BuildOak(ref r1, H, crown, trunkR, trunkTop, crownCenter, arche, detailed: true);
-        var r2 = rng;
-        tree.Low = BuildOak(ref r2, H, crown, trunkR, trunkTop, crownCenter, arche, detailed: false);
+        ulong seed = 9000UL + (ulong)variant * 7919UL;
+        var tree = new Tree();
+        var r1 = new Rng(seed);
+        tree.Detail = BuildOak(ref r1, detailed: true, out tree.Height, out tree.Crown);
+        var r2 = new Rng(seed);
+        tree.Low = BuildOak(ref r2, detailed: false, out _, out _);
         return tree;
     }
 
     /// <summary>
-    /// Built for an overhead camera: a solid trunk and a few visible limbs (hidden inner twigs are omitted), leaf
-    /// clusters at limb tips and filling the crown. Detail is about 450 triangles, low LOD about 100.
+    /// A short trunk (1.9–2.6 m) leaning a little, roots, 4–6 limbs with a side branch each, and round leaf clusters at
+    /// the limb ends plus a crown on top (about 4.5 m in all). The low LOD has the same skeleton with a quarter of the
+    /// leaf cards, 1.6× larger.
     /// </summary>
-    static ArrayMesh BuildOak(ref Rng rng, float H, float crown, float trunkR, float trunkTop, Vector3 crownCenter, int arche, bool detailed)
+    static ArrayMesh BuildOak(ref Rng r, bool detailed, out float height, out float crown)
     {
-        var bark = new MeshBuilder();
+        var bark = new MeshBuilder { Color = Colors.White };
         var leaves = new MeshBuilder();
-        int sides = detailed ? 6 : 4;
-        var lean = new Vector3(rng.Range(-0.25f, 0.25f), 0, rng.Range(-0.25f, 0.25f)) * (arche == 3 ? 1.6f : 1f);
-        Vector3 prev = Vector3.Zero;
-        float prevR = trunkR * 1.4f;
-        int segs = detailed ? 4 : 2;
-        var trunkPts = new List<Vector3> { prev };
-        for (int s = 1; s <= segs; s++)
+        int sides = detailed ? 9 : 5;
+        float trunkH = r.Range(1.9f, 2.6f), r0 = r.Range(0.17f, 0.23f);
+        var lean = new Vector3(r.Range(-0.25f, 0.25f), 0, r.Range(-0.25f, 0.25f));
+        var p0 = new Vector3(0, -0.15f, 0);
+        var p1 = new Vector3(lean.X * 0.3f, trunkH * 0.5f, lean.Z * 0.3f);
+        var p2 = new Vector3(lean.X, trunkH, lean.Z);
+        bark.Tube(p0, p1, r0 * 1.2f, r0 * 0.85f, sides, 0, (p1 - p0).Length());
+        bark.Tube(p1, p2, r0 * 0.85f, r0 * 0.6f, sides, (p1 - p0).Length(), (p1 - p0).Length() + (p2 - p1).Length());
+        int roots = r.Range(3, 6);
+        for (int i = 0; i < roots; i++)
         {
-            float t = s / (float)segs;
-            Vector3 p = new Vector3(0, trunkTop * t, 0) + lean * t * t + new Vector3(rng.Range(-0.06f, 0.06f), 0, rng.Range(-0.06f, 0.06f));
-            float r = trunkR * (1f - 0.35f * t);
-            bark.Tube(prev, p, prevR, r, sides, (s - 1) * 0.5f, s * 0.5f, Flex(prev.Y, H), Flex(p.Y, H));
-            prev = p; prevR = r;
-            trunkPts.Add(p);
+            float a = (i + r.NextFloat() * 0.5f) / roots * Mathf.Tau;
+            var dir = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+            if (detailed) bark.Tube(new Vector3(0, 0.35f, 0) + dir * r0 * 0.3f, dir * (r0 * 2.6f) + Vector3.Down * 0.08f, r0 * 0.55f, r0 * 0.12f, 5, 0, 0.6f);
         }
-        int limbs = arche == 2 ? rng.Range(3, 5) : rng.Range(4, 6);
-        if (!detailed) limbs = Math.Min(limbs, 3);
-        float baseAngle = rng.Range(0f, Mathf.Tau);
-        for (int b = 0; b < limbs; b++)
+
+        var clusters = new List<(Vector3 c, float rad)>();
+        int nb = r.Range(4, 7);
+        float a0 = r.NextFloat() * Mathf.Tau;
+        for (int i = 0; i < nb; i++)
         {
-            float t = rng.Range(0.6f, 1f);
-            Vector3 start = trunkPts[Math.Clamp((int)(t * segs), 1, segs)];
-            float az = baseAngle + b / (float)limbs * Mathf.Tau + rng.Range(-0.4f, 0.4f);
-            float tilt = arche == 1 ? rng.Range(0.35f, 0.7f) : rng.Range(0.6f, 1.1f);
-            var dir = new Vector3(Mathf.Sin(tilt) * Mathf.Cos(az), Mathf.Cos(tilt), Mathf.Sin(tilt) * Mathf.Sin(az));
-            float len = crown * rng.Range(0.7f, 0.95f) / Mathf.Max(0.5f, Mathf.Sin(tilt) + 0.3f);
-            Limb(ref rng, bark, leaves, start, dir, len, trunkR * rng.Range(0.45f, 0.6f), H, crownCenter, detailed, secondary: detailed);
+            float a = a0 + (i + r.Range(-0.25f, 0.25f)) / nb * Mathf.Tau;
+            var start = p1.Lerp(p2, r.Range(0.55f, 1f));
+            var dir = new Vector3(Mathf.Cos(a) * 0.8f, r.Range(0.5f, 0.9f), Mathf.Sin(a) * 0.8f).Normalized();
+            float len = r.Range(1.0f, 1.6f);
+            var end = start + dir * len;
+            bark.Tube(start, end, r0 * 0.5f, r0 * 0.16f, detailed ? 6 : 4, 0, len);
+            var mid = start.Lerp(end, 0.55f);
+            var sdir = (dir + new Vector3(r.Range(-0.7f, 0.7f), 0.3f, r.Range(-0.7f, 0.7f))).Normalized();
+            var send = mid + sdir * len * 0.55f;
+            if (detailed) bark.Tube(mid, send, r0 * 0.25f, r0 * 0.08f, 5, 0, len * 0.55f);
+            clusters.Add((end + Vector3.Up * 0.25f, r.Range(0.85f, 1.15f)));
+            clusters.Add((send + Vector3.Up * 0.15f, r.Range(0.6f, 0.8f)));
         }
-        // fill the crown volume so it reads as one mass from above
-        int fill = detailed ? (int)(crown * crown * 0.7f) + 6 : (int)(crown * crown * 0.3f) + 4;
-        for (int k = 0; k < fill; k++)
+        clusters.Add((p2 + Vector3.Up * 0.85f, r.Range(1.2f, 1.45f)));
+
+        var cc = Vector3.Zero;
+        foreach (var c in clusters) cc += c.c;
+        cc /= clusters.Count;
+        cc.Y -= 0.2f;
+        float cr = 0, bottom = 99, top = -99;
+        foreach (var c in clusters)
         {
-            Vector3 d;
-            do d = new Vector3(rng.Range(-1f, 1f), rng.Range(-0.3f, 0.9f), rng.Range(-1f, 1f)); while (d.LengthSquared() > 1f);
-            var p = crownCenter + new Vector3(d.X * crown, d.Y * (H - trunkTop) * 0.55f, d.Z * crown);
-            LeafCluster(ref rng, leaves, p, rng.Range(1.2f, 1.8f) * (detailed ? 1f : 1.5f), crownCenter, H, detailed ? 3 : 2);
+            cr = Mathf.Max(cr, (c.c - cc).Length() + c.rad);
+            bottom = Mathf.Min(bottom, c.c.Y - c.rad); top = Mathf.Max(top, c.c.Y + c.rad);
         }
+        foreach (var c in clusters)
+        {
+            int cards = (int)(c.rad * c.rad * 30 + 8);
+            float size = r.Range(0.85f, 1.05f);
+            if (!detailed) { cards = Math.Max(3, cards / 4); size *= 1.6f; }
+            LeafCluster(ref r, leaves, c.c, c.rad, cc, cr, cards, size, bottom, top);
+        }
+        height = top;
+        crown = cr;
         var mesh = new ArrayMesh();
         bark.CommitTo(mesh, BarkMaterial);
         leaves.CommitTo(mesh, LeafMaterial);
         return mesh;
     }
 
-    static Color Flex(float y, float H) => new(Mathf.Clamp(y / H, 0f, 1f), 0.5f, 0.5f);
-
-    static void Limb(ref Rng rng, MeshBuilder bark, MeshBuilder leaves, Vector3 start, Vector3 dir, float len, float r,
-        float H, Vector3 crownCenter, bool detailed, bool secondary)
+    static Vector3 RandDir(ref Rng r)
     {
-        const int segs = 2;
-        Vector3 p = start;
-        float segLen = len / segs;
-        for (int s = 0; s < segs; s++)
+        while (true)
         {
-            // oak limbs wander: bend each segment, droop slightly with distance
-            dir = (dir + new Vector3(rng.Range(-0.35f, 0.35f), rng.Range(-0.15f, 0.25f), rng.Range(-0.35f, 0.35f))).Normalized();
-            Vector3 q = p + dir * segLen;
-            float r1 = r * (1f - 0.55f * (s + 1) / segs);
-            bark.Tube(p, q, r * (1f - 0.55f * s / segs), r1, detailed ? 5 : 4, 0, segLen * 0.5f, Flex(p.Y, H), Flex(q.Y, H));
-            if (s == segs - 1 || secondary)
-                LeafCluster(ref rng, leaves, q + new Vector3(rng.Range(-0.3f, 0.3f), rng.Range(0f, 0.4f), rng.Range(-0.3f, 0.3f)),
-                    rng.Range(1.3f, 1.9f) * (detailed ? 1f : 1.5f), crownCenter, H, detailed ? 3 : 2);
-            if (secondary && s == 0)
-            {
-                var sideDir = (dir + new Vector3(rng.Range(-1f, 1f), rng.Range(0.1f, 0.6f), rng.Range(-1f, 1f))).Normalized();
-                Limb(ref rng, bark, leaves, q, sideDir, len * rng.Range(0.4f, 0.55f), r1 * 0.75f, H, crownCenter, detailed, secondary: false);
-            }
-            p = q;
+            var v = new Vector3(r.Range(-1f, 1f), r.Range(-1f, 1f), r.Range(-1f, 1f));
+            float l = v.LengthSquared();
+            if (l > 0.01f && l <= 1f) return v / Mathf.Sqrt(l);
         }
     }
 
-    /// <summary>Three crossed leaf cards with normals spherized from the crown centre (soft, volumetric lighting).</summary>
-    static void LeafCluster(ref Rng rng, MeshBuilder lb, Vector3 c, float size, Vector3 crownCenter, float H, int cards = 3)
+    /// <summary>
+    /// A cluster of leaf cards. Normals point outward from the canopy centre (soft volume look); COLOR.r = canopy
+    /// ambient occlusion (darker deep inside and low down).
+    /// </summary>
+    static void LeafCluster(ref Rng r, MeshBuilder mb, Vector3 center, float radius, Vector3 canopyC, float canopyR,
+        int cards, float cardSize, float bottomY, float topY)
     {
-        float yaw0 = rng.Range(0f, Mathf.Pi);
         for (int k = 0; k < cards; k++)
         {
-            float yaw = yaw0 + k * Mathf.Pi / 3f;
-            float pitch = k == cards - 1 ? Mathf.Pi * 0.5f * rng.Range(0.8f, 1f) : rng.Range(0.55f, 1.05f); // tilted toward the sky
-            var right = new Vector3(Mathf.Cos(yaw), 0, Mathf.Sin(yaw));
-            var up = new Vector3(0, Mathf.Cos(pitch), 0) + new Vector3(-Mathf.Sin(yaw), 0, Mathf.Cos(yaw)) * Mathf.Sin(pitch);
-            float h = size * 0.5f;
-            Vector3[] corners = { c - right * h - up * h, c + right * h - up * h, c + right * h + up * h, c - right * h + up * h };
+            var d = RandDir(ref r);
+            d.Y = d.Y * 0.75f + 0.12f;
+            var pos = center + d * radius * Mathf.Pow(r.NextFloat(), 0.35f) * 0.9f;
+            var outward = (pos - canopyC).Normalized();
+            var cn = (RandDir(ref r) + outward * 0.9f + Vector3.Up * 0.4f).Normalized();
+            var tmp = Mathf.Abs(cn.Y) < 0.9f ? Vector3.Up : Vector3.Right;
+            var right = cn.Cross(tmp).Normalized();
+            var up = right.Cross(cn).Normalized();
+            float ang = r.NextFloat() * Mathf.Tau;
+            var rr = right * Mathf.Cos(ang) + up * Mathf.Sin(ang);
+            var uu = cn.Cross(rr);
+            float s = cardSize * r.Range(0.8f, 1.15f) * 0.5f;
+            Vector3[] corners = { pos - rr * s - uu * s, pos + rr * s - uu * s, pos + rr * s + uu * s, pos - rr * s + uu * s };
             Vector2[] uvs = { new(0, 1), new(1, 1), new(1, 0), new(0, 0) };
-            int start = lb.Count;
+            int start = mb.Count;
             for (int i = 0; i < 4; i++)
             {
-                var n = (corners[i] - crownCenter).Normalized() * 0.75f + new Vector3(0, 0.35f, 0);
-                lb.Add(corners[i], n.Normalized(), uvs[i], new Color(Mathf.Clamp(corners[i].Y / H, 0.3f, 1f), rng.NextFloat(), 0.5f));
+                var p = corners[i];
+                var n = ((p - canopyC).Normalized() + Vector3.Up * 0.35f).Normalized();
+                float depth = Mathf.Clamp((p - canopyC).Length() / canopyR, 0f, 1.2f);
+                float hy = Mathf.Clamp((p.Y - bottomY) / Mathf.Max(topY - bottomY, 0.1f), 0f, 1f);
+                float ao = Mathf.Lerp(0.5f, 1.05f, depth * 0.6f + hy * 0.4f);
+                mb.Add(p, n, uvs[i], new Color(ao, 0, 0));
             }
-            lb.Tri(start, start + 2, start + 1);
-            lb.Tri(start, start + 3, start + 2);
+            mb.Tri(start, start + 2, start + 1);
+            mb.Tri(start, start + 3, start + 2);
         }
     }
 
     // ------------------------------------------------------------------ berry bush
 
-    static StandardMaterial3D _berryMat;
-
+    /// <summary>A round bush of 3–5 leaf clusters (first prototype's model), about 0.9 m tall.</summary>
     public static ArrayMesh Bush(int variant)
     {
-        var rng = new Rng(5000UL + (ulong)variant);
+        var r = new Rng(5000UL + (ulong)variant);
         var leaves = new MeshBuilder();
-        var stems = new MeshBuilder { Color = new Color(0.2f, 0.5f, 0.5f) };
-        var center = new Vector3(0, 0.5f, 0);
-        for (int k = 0; k < 4; k++)
+        const float scale = 1.15f;
+        var cc = new Vector3(0, 0.3f * scale, 0);
+        int n = r.Range(3, 6);
+        var clusters = new List<(Vector3, float)>();
+        for (int i = 0; i < n; i++)
         {
-            var tip = new Vector3(rng.Range(-0.4f, 0.4f), rng.Range(0.5f, 0.9f), rng.Range(-0.4f, 0.4f));
-            stems.Tube(Vector3.Zero, tip, 0.035f, 0.015f, 4, 0, 1, new Color(0, 0.4f, 0.5f), new Color(0.6f, 0.4f, 0.5f));
+            float a = r.NextFloat() * Mathf.Tau;
+            var c = new Vector3(Mathf.Cos(a) * 0.25f, r.Range(0.3f, 0.5f), Mathf.Sin(a) * 0.25f) * scale;
+            clusters.Add((c, r.Range(0.32f, 0.48f) * scale));
         }
-        for (int k = 0; k < 9; k++)
-        {
-            var d = new Vector3(rng.Range(-1f, 1f), rng.Range(-0.2f, 1f), rng.Range(-1f, 1f)).Normalized();
-            LeafCluster(ref rng, leaves, center + new Vector3(d.X * 0.45f, d.Y * 0.35f, d.Z * 0.45f), rng.Range(0.65f, 0.9f), center - new Vector3(0, 0.3f, 0), 1.2f);
-        }
+        foreach (var (c, rad) in clusters)
+            LeafCluster(ref r, leaves, c, rad, cc, 0.75f * scale, (int)(rad * rad * 110 + 6), 0.55f * scale, 0f, 0.9f * scale);
         var m = new ArrayMesh();
-        stems.CommitTo(m, BarkMaterial);
         leaves.CommitTo(m, LeafMaterial);
         return m;
     }
@@ -194,7 +208,7 @@ public static class Models
             var d = new Vector3(rng.Range(-1f, 1f), rng.Range(0f, 1f), rng.Range(-1f, 1f)).Normalized();
             b.Uv2 = new Vector2(k, 0);
             b.Color = new Color(0.32f + rng.Range(-0.05f, 0.05f), 0.08f, 0.36f);
-            b.Ellipsoid(new Vector3(0, 0.5f, 0) + new Vector3(d.X * 0.5f, d.Y * 0.38f, d.Z * 0.5f), new Vector3(0.05f, 0.05f, 0.05f), 6, 4);
+            b.Ellipsoid(new Vector3(0, 0.42f, 0) + new Vector3(d.X * 0.52f, d.Y * 0.36f, d.Z * 0.52f), new Vector3(0.045f, 0.045f, 0.045f), 6, 4);
         }
         var shader = new Shader
         {

@@ -53,25 +53,32 @@ public partial class MapRenderer : Node3D
         _noise = new Remade.Core.Noise(_map.Seed + 4242);
 
         _terrainMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/terrain.gdshader") };
-        _terrainMat.SetShaderParameter("terrain_tex", ProcTextures.Terrain);
+        _terrainMat.SetShaderParameter("noise_tex", ProcTextures.Noise);
         _rockMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/rock.gdshader") };
         _rockMat.SetShaderParameter("granite", ProcTextures.Granite);
         _waterMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/water.gdshader") };
-        _waterMat.SetShaderParameter("normal_a", WaterNormal(11));
-        _waterMat.SetShaderParameter("normal_b", WaterNormal(29));
+        _waterMat.SetShaderParameter("noise_tex", ProcTextures.Noise);
         _waterMat.RenderPriority = 1;
         _wallMat = new ShaderMaterial { Shader = WallShader() };
         _doorMat = new ShaderMaterial { Shader = WallShader() };
 
         _flow = ComputeFlow();
+        _waterMat.SetShaderParameter("river_dir", RiverDirection());
         BuildDataTextures();
     }
 
-    static NoiseTexture2D WaterNormal(int seed) => new()
+    /// <summary>Mean downstream direction of the map's river (the water shader scrolls river water along it).</summary>
+    GV2 RiverDirection()
     {
-        Width = 256, Height = 256, Seamless = true, AsNormalMap = true, BumpStrength = 3.5f, GenerateMipmaps = true,
-        Noise = new FastNoiseLite { Seed = seed, Frequency = 0.035f, FractalOctaves = 4, NoiseType = FastNoiseLite.NoiseTypeEnum.Simplex },
-    };
+        float sx = 0, sy = 0;
+        for (int i = 0; i < _map.CellCount; i++)
+        {
+            if (_map.Terrain[i] is not (Terrain.RiverShallow or Terrain.RiverDeep)) continue;
+            sx += _flow[i * 2] / 255f * 2f - 1f; sy += _flow[i * 2 + 1] / 255f * 2f - 1f;
+        }
+        var d = new GV2(sx, sy);
+        return d.LengthSquared() < 1e-6f ? new GV2(0, 1) : d.Normalized();
+    }
 
     static Shader WallShader() => new()
     {
@@ -117,6 +124,9 @@ void fragment() {
     }
 
     public Texture2D HeightTexture => _heightTex;
+
+    /// <summary>Zoomed out beyond the grass blades, the ground's meadow tint takes over their colour.</summary>
+    public void SetCameraDistance(float camDistance) => _terrainMat.SetShaderParameter("far_view", Mathf.SmoothStep(85f, 95f, camDistance));
 
     void WriteCell(byte[] data, int i)
     {

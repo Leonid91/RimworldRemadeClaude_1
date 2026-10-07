@@ -1,59 +1,58 @@
-// Oak canopy leaf cards: alpha-scissored leaf clusters with spherized normals for soft volume, back-lit translucency,
-// wind sway weighted by vertex colour (r = branch flexibility), seasonal colours, snow on top, and a dithered
-// cut-out around the colonist under your control so they stay visible under the trees.
+// Leaf cards of oaks and bushes (look of the first prototype, RimworldTest): a painted leaf-cluster texture tinted per
+// instance (INSTANCE_CUSTOM.rgb, sRGB; a = sway phase), canopy ambient occlusion in COLOR.r, normals spherized around
+// the canopy for soft volume, back-lit translucency, wind sway growing with height, seasons (autumn hues, thinning
+// in winter), and a dithered line-of-sight cut so the focused colonist stays visible under the canopy.
 shader_type spatial;
-render_mode cull_disabled, diffuse_burley, specular_schlick_ggx, world_vertex_coords;
+render_mode world_vertex_coords, cull_disabled, diffuse_lambert_wrap, specular_schlick_ggx;
 
 #include "res://shaders/world_common.gdshaderinc"
 
-uniform sampler2D leaves : source_color, filter_linear_mipmap, repeat_disable;
+uniform sampler2D leaf_tex : source_color, filter_linear_mipmap, repeat_disable;
+uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
 uniform float alpha_cut = 0.42;
+uniform float sway_amount = 1.0;
+uniform float translucency = 0.7;
 
-varying vec3 wpos;
-varying float variation;
-varying float canopy_h;
-varying float cloud;
+varying vec3 sph_n;
+varying vec3 tint;
+varying float shade;
+varying vec3 vorigin;
+varying vec3 vworld;
+varying float bare;
 
 void vertex() {
-	// world_vertex_coords: VERTEX is already in world space
 	vec3 origin = MODEL_MATRIX[3].xyz;
-	variation = fract(origin.x * 0.731 + origin.z * 0.317);
-	float h = max(VERTEX.y - origin.y, 0.0);
-	canopy_h = h;
-	vec2 sway = wind_sway(origin, h * 0.12, 1.0) * (0.35 + COLOR.r * 0.65);
+	vorigin = origin;
+	float ph = fract(INSTANCE_CUSTOM.a * 2.0) * 6.2831;
+	VERTEX += tree_sway(noise_tex, VERTEX, origin, ph, sway_amount);
 	// leaf flutter
-	sway += vec2(sin(TIME * 4.3 + VERTEX.x * 2.1 + VERTEX.y), cos(TIME * 3.7 + VERTEX.z * 1.9)) * 0.025 * wind_strength * COLOR.r;
-	VERTEX.xz += sway;
-	wpos = VERTEX;
-	cloud = cloud_shadow(origin.xz);
+	VERTEX += vec3(0.0, 1.0, 0.0) * sin(TIME * 5.0 + dot(VERTEX, vec3(3.1, 2.3, 1.7))) * 0.02 * (0.3 + wind_strength);
+	sph_n = NORMAL;
+	vworld = VERTEX;
+	// seasons: per-tree drift towards gold / red through autumn, then the crown thins out in winter
+	vec3 base = pow(INSTANCE_CUSTOM.rgb, vec3(2.2));
+	vec3 autumn = pow(mix(vec3(0.85, 0.55, 0.12), vec3(0.75, 0.25, 0.08), fract(ph * 1.7)), vec3(2.2));
+	float turn = autumn_amount() * (0.6 + 0.6 * fract(ph * 3.1));
+	tint = mix(base, autumn, clamp(turn, 0.0, 1.0));
+	bare = winter_amount();
+	tint = mix(tint, pow(vec3(0.42, 0.30, 0.16), vec3(2.2)), bare * 0.8);
+	shade = COLOR.r;
 }
 
 void fragment() {
-	vec4 tex = texture(leaves, UV);
-	// two-sided cards share one (spherized) normal: undo Godot's automatic back-face normal flip
-	if (!FRONT_FACING) NORMAL = -NORMAL;
-	if (tex.a < alpha_cut) discard;
-	// reveal: dither leaves away around the controlled pawn
-	if (reveal_pos.w > 0.0) {
-		float d = length(wpos.xz - reveal_pos.xz);
-		float above = smoothstep(reveal_pos.y + 0.5, reveal_pos.y + 2.0, wpos.y);
-		float fade = smoothstep(reveal_pos.w, reveal_pos.w * 0.45, d) * above;
-		float dither = fract(dot(FRAGCOORD.xy, vec2(0.5, 0.25)) + hash12(floor(FRAGCOORD.xy)) * 0.5);
-		if (fade > dither) discard;
-	}
-	// per-tree hue variation (yellower to bluer greens) and a brighter sunlit crown top
-	// linear-space greens; the leaf texture is normalised by its own mean leaf colour (also linear)
-	vec3 summer = mix(vec3(0.075, 0.15, 0.025), vec3(0.045, 0.13, 0.04), variation) * (0.9 + variation * 0.25);
-	vec3 base = season_foliage(summer, variation);
-	vec3 col = tex.rgb / vec3(0.040, 0.105, 0.0095) * base;
-	col *= mix(0.8, 1.2, COLOR.r);
-	float up = clamp(NORMAL.y, 0.0, 1.0);
-	col = mix(col, vec3(0.9, 0.92, 0.95), snow_cover * smoothstep(0.3, 0.8, (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).y));
-	col *= cloud;
-	ALBEDO = col;
-	ROUGHNESS = 0.75;
-	SPECULAR = 0.25;
-	BACKLIGHT = col * 0.75;
-	AO = mix(0.6, 1.0, COLOR.r);
-	AO_LIGHT_AFFECT = 0.4;
+	vec4 t = texture(leaf_tex, UV);
+	float cut = reveal_cut(vworld, CAMERA_POSITION_WORLD);
+	// screen-door dither so the hole fades in softly
+	float dither = fract(dot(FRAGCOORD.xy, vec2(0.5, 0.25)) * 2.0 + fract(FRAGCOORD.y * 0.5) * 0.5);
+	ALPHA = cut > dither * 0.9 + 0.05 ? 0.0 : t.a * (1.0 - bare * 0.55);
+	ALPHA_SCISSOR_THRESHOLD = alpha_cut;
+	vec3 c = t.rgb * tint * shade;
+	c = mix(c, vec3(0.6, 0.64, 0.71) * shade, snow_cover * smoothstep(0.3, 0.9, sph_n.y + 0.25) * 0.85);
+	c *= cloud_shadow(vorigin.xz) * 0.6 + 0.4;
+	c *= mix(1.0, 0.8, wetness);
+	ALBEDO = c;
+	NORMAL = normalize((VIEW_MATRIX * vec4(sph_n, 0.0)).xyz);
+	ROUGHNESS = mix(0.7, 0.4, wetness);
+	SPECULAR = 0.12;
+	BACKLIGHT = c * translucency;
 }

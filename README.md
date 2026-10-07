@@ -18,6 +18,13 @@ Play.bat --play          skip the menus: quick start on a default world
 choose a landing site on the globe (hover to see the hexagonal regions, click to select; only temperate forests can be
 settled in this version) → Next → choose a map size (300 up to 1500 cells, RimWorld's largest is 325) → Play.
 
+The globe shows each hexagonal region in one flat biome colour (a map is always a single biome), with a legend. The
+cursor label shows the region and the value of the active map: temperature (°C), elevation (m) or precipitation
+(mm/day). Lakes are inland water (fresh, light blue) and give their shore maps a lake beach; an **estuary** is a large
+river widening into the sea — a settleable river tile, not open ocean. The region panel lists **Water** (Estuary,
+River / Creek, Coast, Lake shore or None), **Ground moisture** (how lush the vegetation, ponds and marshy patches are,
+wet ground and morning fog) and the **average wind** of the region next to the wind right now (hover the ⓘ rows).
+
 **Load game** lists your saves. Save from the in-game menu (Esc).
 
 ## Controls
@@ -32,8 +39,8 @@ settled in this version) → Next → choose a map size (300 up to 1500 cells, R
 | — move | W A S D (rebindable), Shift to sprint |
 | — interact | E: pick up items, gather berries, drink, open/close doors. With several things in reach, roll the mouse wheel to choose (they are highlighted and listed) |
 | — action menu | quick right click on a thing |
-| — aim / shoot | hold the right mouse button to aim (a red line shows your reach: bow range or melee reach, with the distance), left click to shoot or swing. You can move while aiming |
-| Time | Space pause, 1 2 3 4 speeds (Normal, Fast, Faster, Ultra) |
+| — aim / shoot | hold the right mouse button to aim (a red line shows your reach: bow range or melee reach, with the distance), left click to shoot or swing. You can move while aiming. Arrows and blows hit colonists too |
+| Time | Space pause, 1 2 3 4 speeds (Normal, Fast, Faster, Ultra). The bar under the clock shows night, dawn, day and dusk for your latitude and season |
 | Panels | Bio, Equipment, Needs, Health tabs above the colonist panel. F2 planet view. Tab next colonist. F focus |
 
 All keys can be rebound in **Options → Controls**, which also has a one-click **AZERTY (ZQSD)** remap (detected
@@ -41,13 +48,16 @@ automatically on French/Belgian keyboard layouts).
 
 ## The colonist panel
 
-- **Bio** — full name, sex, biological age and chronological age in brackets when they differ (cryptosleep), traits,
-  12 skills from 0 to 20 with passions (skills have no effect yet).
+- **Bio** — full name, sex, biological age and chronological age in brackets when they differ (cryptosleep), traits
+  (hover a trait to see exactly what it changes, e.g. "Move speed +15 %"), 12 skills from 0 to 20 with passions.
 - **Equipment** — a body figure with layer tabs (Skin, Middle, Outer, Headgear, Eyes, Belt) showing what is worn where
-  and what is free; the weapon in hand; and a grid inventory per container (trouser pockets, jacket pockets, satchel).
-  Drag items to rearrange (right click while dragging rotates), right click for Equip / Eat / Drop. The load bar shows
-  the carried mass against your body mass: up to 25 % comfortable, up to 45 % encumbered (a soldier's approach-march
-  load), up to 70 % heavily encumbered, beyond that barely moving.
+  and what is free (everyone starts in a white cotton T-shirt and jeans); the **hands** and one **inventory** grid whose
+  size follows how much the colonist can carry (about one slot per kilogram of their march load, 8 columns).
+  Drag an item from the grid onto the hands to hold it, drag what you hold back into the grid (or right click:
+  Equip / Take in hands / Put away / Eat / Drop); right click while dragging rotates. A bow must be in the hands to
+  shoot. The load bar shows the carried mass against the colonist's carrying capacity (body mass, +20 % with the
+  Strong back trait): up to 25 % comfortable, up to 45 % encumbered and slower (a soldier's approach-march load), up
+  to 70 % heavily encumbered, beyond that barely moving; nothing can be picked up beyond 100 %.
 - **Needs** — food, thirst and sleep, decaying at real-life rates (thirst faster in the heat). No effects yet.
 - **Health** — the body figure: click a part to see its organs and bones (RimWorld's anatomy) with their condition.
   *Operations* → *Add bill* (empty for now).

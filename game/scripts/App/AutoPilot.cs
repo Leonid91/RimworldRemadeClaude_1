@@ -120,6 +120,60 @@ public partial class AutoPilot : Node
                 _wait = 1.5;
                 break;
             }
+            case "hover":
+            {
+                var view = (Main.I.CurrentScreen as PlanetScreen)?.View ?? Game?.Hud.World?.View ?? throw new InvalidOperationException("no planet view");
+                int t = arg == "start" ? view.Planet.FindStartTile() : arg == "lake" ? FirstTile(view.Planet, i => view.Planet.Water[i] == Remade.World.WaterBody.Lake)
+                      : arg == "ocean" ? FirstTile(view.Planet, i => view.Planet.Water[i] == Remade.World.WaterBody.Ocean) : int.Parse(arg);
+                if (arg is "lake" or "ocean") view.FocusTile(t, 2.4f);
+                view.Hover(t);
+                _wait = 0.3;
+                break;
+            }
+            case "hovertext":
+            {
+                var view = (Main.I.CurrentScreen as PlanetScreen)?.View ?? Game?.Hud.World?.View ?? throw new InvalidOperationException("no planet view");
+                string text = Remade.Game.UI.PlanetHoverTip.Describe(view.Planet, view.HoverTile, view.Overlay);
+                Log.Info($"AutoPilot: hover text '{text}'");
+                if (!text.Contains(arg)) Fail($"hover text '{text}' does not contain '{arg}'");
+                break;
+            }
+            case "inv":
+            {
+                // drives the open Equipment tab's inventory like the player would (menu actions)
+                var iv = FindNode<Remade.Game.UI.InventoryView>(Game.Hud) ?? throw new InvalidOperationException("no inventory view open (tab=Equipment first)");
+                var p = Game.Sim.Controlled ?? Game.SelectedPawn;
+                if (arg == "putaway") iv.PutAway();
+                else if (arg.StartsWith("equip:"))
+                {
+                    string id = arg[6..];
+                    var it = p.Inventory.Entries.Select(e => e.Item).FirstOrDefault(i => i.Def.Id == id) ?? throw new InvalidOperationException($"no {id} in the inventory");
+                    iv.Equip(it);
+                }
+                else throw new ArgumentException($"unknown inv action '{arg}'");
+                _wait = 0.5;
+                break;
+            }
+            case "aim":
+            {
+                // holds (on) or releases (off) the right button, aiming at the nearest live deer
+                var sim = Game.Sim;
+                var pawn = Controlled;
+                if (arg == "on")
+                {
+                    var deer = sim.Animals.Where(a => !a.Dead).OrderBy(a => SV2.Distance(a.Position, pawn.Position)).First();
+                    var screen = Game.Camera.Camera.UnprojectPosition(new Vector3(deer.Position.X, sim.Map.StandHeight(deer.Position.X, deer.Position.Y) + 0.9f, deer.Position.Y));
+                    Game.MouseOverride = screen;
+                    Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Right, Pressed = true, Position = screen, ButtonMask = MouseButtonMask.Right });
+                }
+                else
+                {
+                    Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Right, Pressed = false, Position = Game.MouseOverride ?? Vector2.Zero });
+                    Game.MouseOverride = null;
+                }
+                _wait = 0.5;
+                break;
+            }
             case "mapsize": Main.I.Setup.MapSize = int.Parse(arg); break;
             case "pawn": Game.Select(Game.Sim.Pawns[int.Parse(arg)]); Game.FocusOn(Game.Sim.Pawns[int.Parse(arg)]); _wait = 0.3; break;
             case "control":
@@ -306,7 +360,15 @@ public partial class AutoPilot : Node
         Begin($"walkto {what}", () =>
         {
             if (SV2.Distance(pawn.Position, target) <= stop) return true;
+            // an interaction is running (opening a door): hands off the keys, moving would cancel it
+            if (pawn.Job != null) { ReleaseAll(); lastPos = pawn.Position; stuck = 0; return false; }
             while (idx < path.Count - 1 && SV2.Distance(pawn.Position, path[idx]) < 0.2f) idx++;
+            if (stuck > 0.5)
+            {
+                // a closed door in the way: press E like a player would
+                var door = Interactions.Nearby(sim, pawn).FirstOrDefault(i => i.Kind == InteractionKind.OpenDoor);
+                if (door != null) { Log.Info($"AutoPilot: walkto {what}: opening a door on the way"); Interactions.Execute(sim, pawn, door); stuck = 0; return false; }
+            }
             if (stuck > 1.0 && replans < 3)
             {
                 // blocked: plan again from where we are (like a player would)
@@ -364,6 +426,23 @@ public partial class AutoPilot : Node
         if (label.Length > 0)
         {
             int idx = list.FindIndex(i => i.Label.Contains(label, StringComparison.OrdinalIgnoreCase));
+            if (idx < 0 && label.Equals("Open door", StringComparison.OrdinalIgnoreCase) && list.Any(i => i.Kind == InteractionKind.CloseDoor))
+            {
+                // another colonist walked through and left it swinging shut: wait until it closes, then open it for good
+                Log.Info("AutoPilot: interact 'Open door': a colonist just opened it, waiting for it to close");
+                var who = Controlled;
+                bool pressed = false;
+                Begin("open door after it closes", () =>
+                {
+                    if (pressed) return who.Job == null;
+                    var open = Game.NearbyInteractions.FirstOrDefault(i => i.Kind == InteractionKind.OpenDoor);
+                    if (open == null) return false;
+                    Interactions.Execute(Game.Sim, who, open);
+                    pressed = true;
+                    return false;
+                }, 15);
+                return;
+            }
             if (idx < 0) { Fail($"interact '{label}': not among [{string.Join(", ", list.Select(i => i.Label))}]"); return; }
             // scroll the wheel until it is selected (real wheel events)
             for (int k = 0; k < idx; k++) Wheel(false);
@@ -388,7 +467,7 @@ public partial class AutoPilot : Node
         for (int k = 0; k < 64; k++)
         {
             float ang = k * 0.4f;
-            var s = sim.FindStandableNear(p.Position + new SV2(MathF.Cos(ang), MathF.Sin(ang)) * dist, 4);
+            if (!sim.TryFindStandableNear(p.Position + new SV2(MathF.Cos(ang), MathF.Sin(ang)) * dist, 4, out var s)) continue; // water there
             if (!sim.LineOfSight(p.Position, s) || SV2.Distance(s, p.Position) < dist * 0.6f) continue;
             var deer = sim.Animals.Where(a => !a.Dead).OrderBy(a => SV2.Distance(a.Position, p.Position)).First();
             deer.Position = s;
@@ -429,6 +508,13 @@ public partial class AutoPilot : Node
                 return true;
             }
             double now = Time.GetTicksMsec() / 1000.0;
+            if (now >= next && pawn.WeaponCooldown == 0 && OverUi(Game.Hud, screen))
+            {
+                // the deer is under a HUD panel: a click there would hit the panel, as for a player; bring it into the open
+                DeerNear(8f);
+                next = now + 0.3;
+                return false;
+            }
             if (now >= next && pawn.WeaponCooldown == 0)
             {
                 Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = true, Position = screen, ButtonMask = MouseButtonMask.Left | MouseButtonMask.Right });
@@ -458,7 +544,8 @@ public partial class AutoPilot : Node
         var p = sim.Controlled ?? Game.SelectedPawn;
         bool ok = what switch
         {
-            "bow" => p.Weapon?.Def == Defs.Bow,
+            "bow" => p.Held?.Def == Defs.Bow,
+            "bowaway" => p.Held == null && p.Inventory.CountOf(Defs.Bow) == 1,
             "arrows" => p.Arrows > 0,
             "meat" => p.CountInInventory(Defs.Venison) > 0,
             "deerdead" => sim.Animals.Any(a => a.Dead) || sim.Items.Any(i => i.Def == Defs.Venison),
@@ -468,6 +555,38 @@ public partial class AutoPilot : Node
         };
         if (ok) Log.Info($"AutoPilot: expectation '{what}' met");
         else Fail($"expectation '{what}' not met");
+    }
+
+    /// <summary>True when a visible HUD control that takes mouse clicks covers this screen point.</summary>
+    static bool OverUi(Node root, Vector2 p)
+    {
+        foreach (var c in root.GetChildren())
+        {
+            if (c is Control ctl)
+            {
+                if (!ctl.IsVisibleInTree()) continue;
+                if (ctl.MouseFilter == Control.MouseFilterEnum.Stop && ctl.GetGlobalRect().HasPoint(p)) return true;
+            }
+            if (OverUi(c, p)) return true;
+        }
+        return false;
+    }
+
+    static int FirstTile(Remade.World.Planet p, Func<int, bool> pred)
+    {
+        for (int i = 0; i < p.TileCount; i++) if (pred(i)) return i;
+        throw new InvalidOperationException("no tile matches");
+    }
+
+    static T FindNode<T>(Node root) where T : Node
+    {
+        foreach (var c in root.GetChildren())
+        {
+            if (c is T t) return t;
+            var r = FindNode<T>(c);
+            if (r != null) return r;
+        }
+        return null;
     }
 
     void Finish()

@@ -52,15 +52,21 @@ public partial class Hud : CanvasLayer
         // time panel (bottom right)
         var tp = UiKit.Panel(null);
         tp.SetAnchorsPreset(Control.LayoutPreset.BottomRight);
-        tp.Position = new Vector2(-330, -186);
-        tp.CustomMinimumSize = new Vector2(318, 174);
+        tp.CustomMinimumSize = new Vector2(318, 206);
+        // pinned by its bottom-right corner: a long weather line widens the panel to the left, never off screen
+        tp.GrowHorizontal = Control.GrowDirection.Begin;
+        tp.GrowVertical = Control.GrowDirection.Begin;
+        tp.OffsetRight = -12; tp.OffsetBottom = -12;
+        tp.OffsetLeft = -12 - 318; tp.OffsetTop = -12 - 206;
         var tv = UiKit.VBox(2);
         tp.AddChild(tv);
         _clock = UiKit.Label("", 32, UiKit.Text, bold: true, align: HorizontalAlignment.Right);
         _date = UiKit.Label("", 15, UiKit.Muted, align: HorizontalAlignment.Right);
         _temp = UiKit.Label("", 15, UiKit.Accent, align: HorizontalAlignment.Right);
         _weather = UiKit.Label("", 14, UiKit.Muted, align: HorizontalAlignment.Right);
-        tv.AddChild(_clock); tv.AddChild(_date); tv.AddChild(_temp); tv.AddChild(_weather);
+        tv.AddChild(_clock);
+        tv.AddChild(new DayBar(_sim) { CustomMinimumSize = new Vector2(0, 26), Name = "DayBar", TooltipText = "Time of day: night, dawn, day and dusk for this latitude and season." });
+        tv.AddChild(_date); tv.AddChild(_temp); tv.AddChild(_weather);
         _speeds = UiKit.HBox(4);
         _speeds.Alignment = BoxContainer.AlignmentMode.End;
         string[] glyphs = { "II", "▶", "▶▶", "▶▶▶", "⚡" };
@@ -75,7 +81,7 @@ public partial class Hud : CanvasLayer
         root.AddChild(tp);
         _fps = UiKit.Label("", 12, new Color(UiKit.Muted, 0.7f), align: HorizontalAlignment.Right);
         _fps.SetAnchorsPreset(Control.LayoutPreset.BottomRight);
-        _fps.Position = new Vector2(-330, -206);
+        _fps.Position = new Vector2(-330, -238);
         _fps.CustomMinimumSize = new Vector2(318, 0);
         root.AddChild(_fps);
 
@@ -298,7 +304,7 @@ public partial class WorldOverlay : Control
         _sim = sim;
         UiKit.Fill(this);
         MouseFilter = MouseFilterEnum.Stop;
-        _view = UiKit.Fill(new PlanetView(640));
+        _view = UiKit.Fill(new PlanetView(1024));
         AddChild(_view);
         _view.SetPlanet(sim.Planet, () =>
         {
@@ -320,6 +326,7 @@ public partial class WorldOverlay : Control
         overlays.SetAnchorsPreset(LayoutPreset.TopRight);
         overlays.Position = new Vector2(-560, 30);
         AddChild(overlays);
+        AddChild(new PlanetHoverTip(_view));
         var back = UiKit.Button($"Back to the colony [{Settings.KeyName("world")}]", close, 18, 300);
         back.SetAnchorsPreset(LayoutPreset.BottomRight);
         back.Position = new Vector2(-340, -80);
@@ -336,4 +343,54 @@ public partial class WorldOverlay : Control
     }
 
     public PlanetView View => _view;
+}
+
+/// <summary>
+/// The day as a strip (from the first prototype): night blue, dawn and dusk orange, day sky blue, computed from the
+/// real sun height for the colony's latitude and season (long summer days, short winter days), ticks every six
+/// hours, and a sun or moon marker at the current hour.
+/// </summary>
+public partial class DayBar : Control
+{
+    readonly GameSim _sim;
+    const int Slices = 48;
+    readonly float[] _elev = new float[Slices + 1];
+    long _day = -1;
+
+    public DayBar(GameSim sim) { _sim = sim; MouseFilter = MouseFilterEnum.Pass; }
+
+    public override void _Process(double delta) => QueueRedraw();
+
+    public override void _Draw()
+    {
+        long day = _sim.Tick / GameTime.TicksPerDay;
+        if (day != _day)
+        {
+            _day = day;
+            for (int i = 0; i <= Slices; i++)
+                _elev[i] = Remade.Game.Render.Lighting.SolarDirection(_sim.Latitude, day * GameTime.TicksPerDay + (long)((i + 0.5f) / Slices * GameTime.TicksPerDay)).Y;
+        }
+        float w = Size.X, h = Size.Y - 8;
+        var night = new Color(0.08f, 0.1f, 0.22f);
+        var dayC = new Color(0.45f, 0.7f, 0.95f);
+        var dawn = new Color(0.98f, 0.55f, 0.3f);
+        for (int i = 0; i < Slices; i++)
+        {
+            float sun = _elev[i];
+            var c = night.Lerp(dayC, Mathf.SmoothStep(-0.1f, 0.3f, sun));
+            c = c.Lerp(dawn, Mathf.Max(0f, 1f - Mathf.Abs(sun) / 0.16f) * 0.75f);
+            DrawRect(new Rect2(w * i / Slices, 4, w / Slices + 1, h), c);
+        }
+        DrawRect(new Rect2(0, 4, w, h), new Color(1, 1, 1, 0.25f), false, 1f);
+        for (int k = 0; k <= 24; k += 6)
+            DrawLine(new Vector2(w * k / 24f, 4 + h - 4), new Vector2(w * k / 24f, 4 + h), new Color(1, 1, 1, 0.5f), 1f);
+        float hour = GameTime.HourOfDay(_sim.Tick);
+        float x = hour / 24f * w;
+        bool isDay = Remade.Game.Render.Lighting.SolarDirection(_sim.Latitude, _sim.Tick).Y > -0.02f;
+        DrawLine(new Vector2(x, 0), new Vector2(x, Size.Y), Colors.White, 2f);
+        var mc = new Vector2(x, 4 + h / 2);
+        if (isDay) DrawCircle(mc, 7, new Color(1f, 0.85f, 0.35f));
+        else { DrawCircle(mc, 7, new Color(0.9f, 0.92f, 1f)); DrawCircle(mc + new Vector2(3, -2), 6, night); }
+        DrawCircle(mc, 7.5f, new Color(0, 0, 0, 0.5f), false, 1.5f);
+    }
 }

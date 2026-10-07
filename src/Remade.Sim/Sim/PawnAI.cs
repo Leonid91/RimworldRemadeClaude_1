@@ -25,7 +25,7 @@ public sealed partial class GameSim
             float hours = NeedsInterval / (float)GameTime.TicksPerHour;
             bool asleep = p.Job?.Kind == JobKind.Sleep && p.Job.Stage == 1;
             float exertion = p.Anim == PawnAnim.Run ? 1.6f : p.Anim == PawnAnim.Work ? 1.3f : 1f;
-            p.Needs.Tick(hours, asleep, Weather.Temperature, exertion);
+            p.Needs.Tick(hours, asleep, Weather.Temperature, exertion, p.StatFactor(Stat.HungerRate), p.StatFactor(Stat.ThirstRate), p.StatFactor(Stat.FatigueRate));
             if (p.Health.TickBleeding(hours)) Die(p);
         }
 
@@ -178,8 +178,7 @@ public sealed partial class GameSim
         var n = p.Needs;
         float hour = GameTime.HourOfDay(Tick);
         bool night = hour >= 22f || hour < 6f;
-        if (p.HasTrait("night_owl")) night = hour >= 10f && hour < 17f;
-        if (n.Rest < Needs.TiredThreshold || (night && n.Rest < 0.85f))
+                if (n.Rest < Needs.TiredThreshold || (night && n.Rest < 0.85f))
         {
             StartJob(p, new Job { Kind = JobKind.Sleep, Label = "Sleeping" });
             return;
@@ -218,10 +217,9 @@ public sealed partial class GameSim
 
     Item BestFoodInInventory(Pawn p)
     {
-        foreach (var g in p.Containers)
-            foreach (var e in g.Entries)
-                if (e.Item.Def.Kind == ThingKind.Food) return e.Item;
-        return null;
+        foreach (var e in p.Inventory.Entries)
+            if (e.Item.Def.Kind == ThingKind.Food) return e.Item;
+        return p.Held?.Def.Kind == ThingKind.Food ? p.Held : null;
     }
 
     /// <summary>
@@ -279,6 +277,7 @@ public sealed partial class GameSim
 
     public void StartJob(Pawn p, Job job)
     {
+        Invariant.Check(job.Kind != JobKind.Goto || (job.TargetCell >= 0 && job.TargetCell < Map.CellCount), $"{p.Name}: Goto job without a valid target cell ({job.TargetCell})");
         ClearJob(p);
         p.Job = job;
         p.LastJobLabel = job.Label ?? job.Kind.ToString();
@@ -436,6 +435,7 @@ public sealed partial class GameSim
         if (look.LengthSquared() > 1e-4f) p.Facing = MathF.Atan2(look.Y, look.X);
         p.Anim = j.Kind switch { JobKind.Drink => PawnAnim.Drink, JobKind.PickUp => PawnAnim.PickUp, _ => PawnAnim.Work };
         int work = j.WorkTicks > 0 ? j.WorkTicks : j.Kind switch { JobKind.PickUp => 25, JobKind.ToggleDoor => 12, JobKind.Gather => 160, _ => 90 };
+        if (j.Kind == JobKind.Gather) work = (int)(work / p.StatFactor(Stat.GatherSpeed));
         if (++j.Timer < work) return;
 
         switch (j.Kind)
@@ -448,7 +448,8 @@ public sealed partial class GameSim
                 if (ok && j.EatAfter)
                 {
                     Item food = null;
-                    foreach (var g in p.Containers) foreach (var e in g.Entries) if (e.Item.Def == def) food = e.Item;
+                    foreach (var e in p.Inventory.Entries) if (e.Item.Def == def) food = e.Item;
+                    if (food == null && p.Held?.Def == def) food = p.Held;
                     if (food != null) EatFromInventory(p, food);
                 }
                 break;
@@ -458,7 +459,7 @@ public sealed partial class GameSim
                 int n = Map.Berries[j.TargetCell];
                 var berries = new Item(NewId(), Defs.Berries, n);
                 int taken = 0;
-                foreach (var g in p.Containers) { taken += g.Absorb(berries, NewId); if (berries.Count == 0) break; }
+                taken += p.Inventory.Absorb(berries, NewId);
                 Map.SetBerries(j.TargetCell, (byte)(n - taken));
                 if (berries.Count > 0) PlaceOnGround(berries, Map.CellCenter(InteractionSpot(j.TargetCell, p.Position)));
                 Events.Add(new SimEvent(SimEventKind.Gathered, targetPos, $"+{n} berries"));
@@ -488,7 +489,7 @@ public sealed partial class GameSim
     }
 
     /// <summary>Mining speed in rock hit points per tick: a novice clears a granite cell in ~12 s at 1x, a master in ~4 s.</summary>
-    public static float MiningRate(Pawn p) => 2f + p.Skills[(int)SkillId.Mining] * 0.25f;
+    public static float MiningRate(Pawn p) => (2f + p.Skills[(int)SkillId.Mining] * 0.25f) * p.StatFactor(Stat.WorkSpeed);
 
     void RunMineJob(Pawn p, Job j)
     {
@@ -524,41 +525,48 @@ public sealed partial class GameSim
     }
 
     /// <summary>
-    /// Picks an item up: a weapon goes to the hands if they are free, everything else into the containers.
-    /// Respects the maximum load (body mass); takes a partial stack when only part of it fits.
+    /// Picks an item up: a weapon goes to the hands if they are free, everything else into the inventory; when the
+    /// inventory has no room, free hands carry it. Respects the maximum load; takes part of a stack when only part fits.
     /// </summary>
     public bool PickUp(Pawn p, Item it)
     {
         if (!it.Spawned) throw new InvalidOperationException($"{it} is not on the ground");
-        float free = p.BodyMassKg * Pawn.MaxLoad - p.CarriedMass;
+        float free = p.CarryBasisKg * Pawn.MaxLoad - p.CarriedMass;
         int canCarry = it.Def.Mass <= 0 ? it.Count : Math.Min(it.Count, (int)MathF.Floor(free / it.Def.Mass + 1e-4f));
-        if (it.Contents != null && it.TotalMass > free) canCarry = 0;
         if (canCarry <= 0)
         {
             Message($"{p.Name} cannot carry any more weight ({p.CarriedMass:F1} kg).", p.Position);
             return false;
         }
-        if (it.Def.Kind == ThingKind.Weapon && p.Weapon == null)
+        if (it.Def.Kind == ThingKind.Weapon && p.Held == null)
         {
             Despawn(it);
-            p.Weapon = it;
-            Events.Add(new SimEvent(SimEventKind.ItemPickedUp, it.Position, $"{p.Name} equips {it.Def.Label}", it.Id));
-            Log.Info($"{p.Name} picked up and equipped {it}");
+            p.Held = it;
+            Events.Add(new SimEvent(SimEventKind.ItemPickedUp, it.Position, $"{p.Name} takes the {it.Def.Label} in hand", it.Id));
+            Log.Info($"{p.Name} picked up {it} into the hands");
             return true;
         }
         int before = it.Count;
         int taken = 0;
         if (it.Def.StackLimit == 1)
         {
-            foreach (var g in p.Containers)
-                if (g.FindSpot(it.Def, out _, out _, out _)) { Despawn(it); g.TryInsert(it); taken = 1; break; }
+            if (p.Inventory.FindSpot(it.Def, out _, out _, out _)) { Despawn(it); p.Inventory.TryInsert(it); taken = 1; }
         }
         else
         {
             var src = canCarry < it.Count ? new Item(NewId(), it.Def, canCarry) : it;
-            foreach (var g in p.Containers) { taken += g.Absorb(src, NewId); if (src.Count == 0) break; }
+            taken = p.Inventory.Absorb(src, NewId);
             if (src != it) it.Count -= taken;
             if (it.Count == 0) Despawn(it);
+        }
+        if (taken == 0 && p.Held == null && canCarry == it.Count)
+        {
+            // no room in the pack: carry it in the hands
+            Despawn(it);
+            p.Held = it;
+            Events.Add(new SimEvent(SimEventKind.ItemPickedUp, it.Position, $"{p.Name} carries {it.Label} in hand", it.Id));
+            Log.Info($"{p.Name} picked up {it} into the hands (inventory full)");
+            return true;
         }
         if (taken == 0)
         {
@@ -570,38 +578,56 @@ public sealed partial class GameSim
         return true;
     }
 
+    /// <summary>Drops an item from the inventory or the hands onto the ground in front of the colonist.</summary>
     public void DropFromInventory(Pawn p, Item it)
     {
-        bool removed = false;
-        foreach (var g in p.Containers) if (g.Remove(it)) { removed = true; break; }
-        if (!removed && p.Weapon == it) { p.Weapon = null; removed = true; }
+        bool removed = p.Inventory.Remove(it);
+        if (!removed && p.Held == it) { p.Held = null; removed = true; }
         Invariant.Check(removed, $"{p.Name} does not carry {it}");
         PlaceOnGround(it, p.Position + new Vector2(MathF.Cos(p.Facing), MathF.Sin(p.Facing)) * 0.6f);
         Events.Add(new SimEvent(SimEventKind.ItemDropped, it.Position, null, it.Id));
         Log.Info($"{p.Name} dropped {it}");
     }
 
-    /// <summary>Moves a weapon from the inventory to the hands (the current weapon goes into the inventory, or the ground).</summary>
-    public void EquipFromInventory(Pawn p, Item weapon)
+    /// <summary>Takes an item from the inventory into the hands; whatever was held goes into the inventory (or the ground).</summary>
+    public void EquipFromInventory(Pawn p, Item item)
     {
-        if (weapon.Def.Kind != ThingKind.Weapon) throw new ArgumentException($"{weapon} is not a weapon");
-        bool removed = false;
-        foreach (var g in p.Containers) if (g.Remove(weapon)) { removed = true; break; }
-        Invariant.Check(removed, $"{p.Name} does not carry {weapon}");
-        if (p.Weapon != null) Unequip(p);
-        p.Weapon = weapon;
-        Log.Info($"{p.Name} equipped {weapon}");
+        bool removed = p.Inventory.Remove(item);
+        Invariant.Check(removed, $"{p.Name} does not carry {item} in the inventory");
+        if (p.Held != null) Unequip(p);
+        p.Held = item;
+        Log.Info($"{p.Name} took {item} in hand");
     }
 
-    /// <summary>Puts the weapon in hand away into the inventory (or drops it if there is no room).</summary>
+    /// <summary>Puts what is held into the inventory (or drops it if there is no room).</summary>
     public void Unequip(Pawn p)
     {
-        if (p.Weapon == null) return;
-        var w = p.Weapon;
-        p.Weapon = null;
-        foreach (var g in p.Containers) if (g.TryInsert(w)) { Log.Info($"{p.Name} put {w} away"); return; }
+        if (p.Held == null) return;
+        var w = p.Held;
+        p.Held = null;
+        if (w.Def.StackLimit == 1 ? p.Inventory.TryInsert(w) : TryAbsorbWhole(p.Inventory, w)) { Log.Info($"{p.Name} put {w} away"); return; }
         PlaceOnGround(w, p.Position);
         Message($"{p.Name} has no room for the {w.Def.Label} and drops it.", p.Position);
+    }
+
+    /// <summary>Moves a whole stack into a grid, or nothing (no partial moves out of the hands).</summary>
+    bool TryAbsorbWhole(InventoryGrid g, Item it)
+    {
+        if (!g.FindSpot(it.Def, out int x, out int y, out bool rot)) return false;
+        g.Place(it, x, y, rot);
+        return true;
+    }
+
+    /// <summary>Moves an item between the inventory and the hands at an explicit grid spot (drag and drop).</summary>
+    public bool MoveHeldToGrid(Pawn p, int x, int y, bool rotated)
+    {
+        var it = p.Held ?? throw new InvalidOperationException($"{p.Name} holds nothing");
+        var e = new GridEntry { Item = it, X = x, Y = y, Rotated = rotated };
+        if (!p.Inventory.Fits(x, y, e.W, e.H)) return false;
+        p.Held = null;
+        p.Inventory.Place(it, x, y, rotated);
+        Log.Info($"{p.Name} put {it} into the inventory at {x},{y}");
+        return true;
     }
 
     public void EatFromInventory(Pawn p, Item food)
@@ -615,7 +641,7 @@ public sealed partial class GameSim
             p.Needs.Thirst = MathF.Min(1f, p.Needs.Thirst + food.Def.Hydration);
             food.Count--; bites++;
         }
-        if (food.Count == 0) foreach (var g in p.Containers) if (g.Remove(food)) break;
+        if (food.Count == 0 && !p.Inventory.Remove(food) && p.Held == food) p.Held = null;
         Events.Add(new SimEvent(SimEventKind.Ate, p.Position, $"{p.Name} ate {bites} {food.Def.Label}"));
         Log.Info($"{p.Name} ate {bites}x {food.Def.Id}; food {p.Needs.Food:P0}");
     }

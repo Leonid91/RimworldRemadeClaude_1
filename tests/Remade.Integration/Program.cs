@@ -148,7 +148,8 @@ GameSim sim = null;
 {
     int id = 1;
     var pawns = PawnGenerator.GenerateGroup(3, 8, () => id++);
-    var g = GameSim.NewColony(new Planet(new WorldParams { Seed = 777, Frequency = 64 }), planet.FindStartTile(), 600, pawns, 77, GameTime.TicksPerHour * 9);
+    var goalPlanet = new Planet(new WorldParams { Seed = 777, Frequency = 64 });
+    var g = GameSim.NewColony(goalPlanet, goalPlanet.FindStartTile(), 600, pawns, 77, GameTime.TicksPerHour * 9);
     var p = g.Pawns[0];
     p.Skills[(int)SkillId.Shooting] = 10;
     g.SetMode(p, ControlMode.Direct);
@@ -172,18 +173,28 @@ GameSim sim = null;
         Walk(g, p, g.FindStandableNear(new Vector2(300, 300), 10), 0.5f);
         var deer = g.Animals.OrderBy(a => Vector2.Distance(a.Position, p.Position)).First();
         int shots = 0;
+        bool Reach(Vector2 q) => g.Paths.Reachable(g.Map.CellAt(p.Position), g.Map.CellAt(q));
+        // brings the deer back into the open, in sight and on the colonist's side of any water (we test shooting, not tracking)
+        void PlaceDeer()
+        {
+            for (int k = 0; k < 40; k++)
+            {
+                if (!g.TryFindStandableNear(p.Position + new Vector2(MathF.Cos(k), MathF.Sin(k)) * 8f, 4, out var s)) continue;
+                if (g.LineOfSight(p.Position, s) && Reach(s)) { deer.Position = s; deer.Path.Clear(); deer.PathIndex = 0; return; }
+            }
+            throw new InvalidOperationException($"no open spot in sight of {p.Position}");
+        }
         while (!deer.Dead && p.Arrows > 0 && shots < 40)
         {
-            if (Vector2.Distance(deer.Position, p.Position) > 14f || !g.LineOfSight(p.Position, deer.Position))
-            {
-                for (int k = 0; k < 40; k++)
-                {
-                    var s = g.FindStandableNear(p.Position + new Vector2(MathF.Cos(k), MathF.Sin(k)) * 8f, 4);
-                    if (g.LineOfSight(p.Position, s)) { deer.Position = s; deer.Path.Clear(); deer.PathIndex = 0; break; }
-                }
-            }
+            if (Vector2.Distance(deer.Position, p.Position) > 14f || !g.LineOfSight(p.Position, deer.Position) || !Reach(deer.Position)) PlaceDeer();
             g.Input.Aim = true; g.Input.AimPoint = deer.Position; g.Input.Fire = true;
-            Run(g, 75); shots++;
+            // a wounded deer running across a river channel is called back (its meat must stay reachable on foot)
+            for (int k = 0; k < 5 && !deer.Dead; k++)
+            {
+                Run(g, 15);
+                if (!deer.Dead && !Reach(deer.Position)) PlaceDeer();
+            }
+            shots++;
         }
         g.Input.Aim = false;
         if (!deer.Dead) failure = $"deer alive after {shots} shots";
@@ -196,7 +207,7 @@ GameSim sim = null;
             if (p.CountInInventory(Defs.Venison) == 0) failure = "meat not picked up";
         }
         Check("goal scenario on a 600x600 map (bow → deer → meat)", failure == null,
-            failure ?? $"bow {p.Weapon?.Def.Id}, {p.Arrows} arrows left after {shots} shots, carrying {p.CountInInventory(Defs.Venison)} venison, load {p.CarriedMass:F1} kg");
+            failure ?? $"bow {p.Held?.Def.Id}, {p.Arrows} arrows left after {shots} shots, carrying {p.CountInInventory(Defs.Venison)} venison, load {p.CarriedMass:F1} kg");
     }
     catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
     {
@@ -232,7 +243,9 @@ static void Walk(GameSim g, Pawn p, Vector2 target, float stop)
     var path = new List<Vector2>();
     int goal = g.Map.CellAt(target);
     if (g.Paths.Cost[goal] == 0 || g.Map.Buildings[goal] == Building.Door) goal = g.InteractionSpot(goal, p.Position);
-    if (g.Pathfinder.FindPath(g.Map.CellAt(p.Position), goal, path) != PathResult.Found) throw new InvalidOperationException($"no path to {target}");
+    var res = g.Pathfinder.FindPath(g.Map.CellAt(p.Position), goal, path);
+    if (res != PathResult.Found)
+        throw new InvalidOperationException($"no path to {target} ({res}; goal cell {goal} {g.Map.Terrain[goal]} cost {g.Paths.Cost[goal]}, from {p.Position} {g.Map.Terrain[g.Map.CellAt(p.Position)]})");
     path.Add(target);
     int idx = 0;
     for (int t = 0; t < 40000 && Vector2.Distance(p.Position, target) > stop; t++)

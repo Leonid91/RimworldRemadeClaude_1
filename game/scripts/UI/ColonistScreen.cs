@@ -131,7 +131,8 @@ public partial class ColonistScreen : ScreenBase
         foreach (var t in p.Traits)
         {
             var chip = UiKit.Panel(UiKit.Label(t.Label, 15), new Color(0.12f, 0.17f, 0.2f, 0.95f), 6);
-            chip.TooltipText = t.Description;
+            chip.TooltipText = t.EffectsText();
+            chip.MouseFilter = MouseFilterEnum.Stop;
             flow.AddChild(chip);
         }
         c1.AddChild(flow);
@@ -167,7 +168,12 @@ public partial class ColonistScreen : ScreenBase
             c3.AddChild(UiKit.Label($"{a.Def.Label}  ·  {string.Join("/", a.Def.Layers.Select(l => l.ToString().ToLowerInvariant()))}", 15, UiKit.Muted));
         c3.AddChild(UiKit.Spacer(0, 8));
         c3.AddChild(UiKit.Heading("Carrying capacity"));
-        c3.AddChild(UiKit.Label($"Comfortable up to {p.BodyMassKg * Pawn.LightLoad:F0} kg, max {p.BodyMassKg * Pawn.MaxLoad:F0} kg", 15, UiKit.Muted));
+        var cap = UiKit.Label($"Comfortable up to {p.CarryBasisKg * Pawn.LightLoad:F0} kg, max {p.CarryBasisKg * Pawn.MaxLoad:F0} kg  ·  inventory {p.Inventory.W}×{p.Inventory.H}", 15, UiKit.Muted);
+        cap.TooltipText = $"Measured against {(p.CarryBasisKg != p.BodyMassKg ? $"{p.CarryBasisKg:F0} kg (body mass {p.BodyMassKg:F0} kg × traits)" : $"the body mass ({p.BodyMassKg:F0} kg)")}:\n" +
+                          $"{Pawn.LightLoad * 100:F0} % comfortable, {Pawn.MarchLoad * 100:F0} % march load (slower), {Pawn.HeavyLoad * 100:F0} % heavy, {Pawn.MaxLoad * 100:F0} % maximum.\n" +
+                          "Inventory slots: about one per kilogram of the march load.";
+        cap.MouseFilter = MouseFilterEnum.Stop;
+        c3.AddChild(cap);
         cols.AddChild(c3);
     }
 

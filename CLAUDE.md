@@ -50,6 +50,14 @@ game/shaders             world_common.gdshaderinc (globals), terrain, rock, wate
   Sim facing angle 0 = +x; model yaw = −facing − π/2. Godot front faces are clockwise.
 - Vertex colours are sRGB (`VertexColorIsSrgb`, or `pow(COLOR, 2.2)` in custom shaders). Shader colour constants are linear.
 - Two-sided cards (leaves, grass) undo Godot's back-face normal flip (`if (!FRONT_FACING) NORMAL = -NORMAL;`).
+- World look follows the first prototype (D:\Experiments\RimworldTest): shared RGBA noise texture
+  (`ProcTextures.Noise`: R fbm, G cellular, B value, A low-freq), terrain/grass/water/foliage/bark shaders, lighting.
+- Plant MultiMesh custom data = leaf tint (sRGB rgb) + sway phase × 0.5 (a). Grass field slots carry only a slot index;
+  every random property is hashed from the WORLD cell (never from the window slot, or the field re-shuffles = shimmer).
+- PawnModel joints: +X rotation swings a hanging limb forward (−Z); knees bend with −X, elbows with +X. Held bow is
+  oriented from the body yaw (not the arm chain).
+- Planet water: `Planet.Water[t]` (None/Ocean/Lake); lakes = small enclosed water bodies (Biome.Lake), estuaries are
+  land river tiles (`Estuary[t]`) draining to the sea. Coast = next to ocean, LakeShore = next to a lake.
 - Map mutations go through LocalMap setters (they record CellChange); GameSim applies them to the path grid each tick
   and hands them to the renderers once per frame (`FrameChanges`).
 - The planet and all its maps share one clock: a colony cannot start before the planet's climate time.

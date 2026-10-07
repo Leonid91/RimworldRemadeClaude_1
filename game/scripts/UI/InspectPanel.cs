@@ -226,7 +226,7 @@ public partial class InspectPanel : Control
         foreach (var t in p.Traits)
         {
             var chip = UiKit.Panel(UiKit.Label(t.Label, 15), new Color(0.12f, 0.17f, 0.2f, 0.95f), 6);
-            chip.TooltipText = t.Description;
+            chip.TooltipText = t.EffectsText();
             chip.MouseFilter = MouseFilterEnum.Stop;
             flow.AddChild(chip);
         }
@@ -289,17 +289,16 @@ public partial class InspectPanel : Control
 
         var right = UiKit.VBox(8);
         right.CustomMinimumSize = new Vector2(330, 0);
-        right.AddChild(UiKit.Heading("Hands"));
-        var hands = UiKit.HBox(8);
-        hands.AddChild(UiKit.Label(p.Weapon != null ? $"{p.Weapon.Def.Label} · {p.Weapon.Def.Range:F0} m range · {p.Arrows} arrows" : "Empty (fists)", 15));
-        if (p.Weapon != null)
+        var handsRow = UiKit.HBox(8);
+        if (p.Held != null)
         {
-            hands.AddChild(UiKit.Button("Put away", () => { _sim.Unequip(p); BuildTab(); }, 14));
-            hands.AddChild(UiKit.Button("Drop", () => { _sim.DropFromInventory(p, p.Weapon); BuildTab(); }, 14));
+            var held = p.Held;
+            handsRow.AddChild(UiKit.Button("Put away", () => { Log.Action($"put away {held}"); _sim.Unequip(p); BuildTab(); }, 14));
+            handsRow.AddChild(UiKit.Button("Drop", () => { Log.Action($"drop {held}"); _sim.DropFromInventory(p, held); BuildTab(); }, 14));
         }
-        right.AddChild(hands);
-        right.AddChild(UiKit.Heading("Inventory"));
-        right.AddChild(new InventoryView(_sim, p, () => { }));
+        // the whole tab is rebuilt after every inventory change so the hands, the figure and the load stay in sync
+        right.AddChild(new InventoryView(_sim, p, () => CallDeferred(MethodName.BuildTab)));
+        right.AddChild(handsRow);
         row.AddChild(right);
         return row;
     }

@@ -121,6 +121,42 @@ public class PlanetTests
     }
 
     [Fact]
+    public void LakesAreInlandWaterNotOcean()
+    {
+        var p = Shared.Value;
+        int lakes = 0, ocean = 0;
+        for (int i = 0; i < p.TileCount; i++)
+        {
+            Assert.Equal(p.Elevation[i] < 0, p.Water[i] != WaterBody.None);
+            if (p.Water[i] == WaterBody.Lake) { lakes++; Assert.Equal(Biome.Lake, p.Biomes[i]); }
+            if (p.Water[i] == WaterBody.Ocean) { ocean++; Assert.Equal(Biome.Ocean, p.Biomes[i]); }
+            if (p.LakeShore[i]) Assert.Contains(p.Grid.Neighbors(i).ToArray(), nb => p.Water[nb] == WaterBody.Lake);
+        }
+        _out.WriteLine($"lake tiles {lakes}, ocean tiles {ocean}");
+        Assert.True(lakes > 0, "no lakes");
+        Assert.True(ocean > lakes * 20);
+    }
+
+    [Fact]
+    public void EstuariesAreRiverMouthsOnLand()
+    {
+        var p = Shared.Value;
+        int n = 0;
+        for (int i = 0; i < p.TileCount; i++)
+        {
+            if (!p.Estuary[i]) continue;
+            n++;
+            Assert.Equal(WaterBody.None, p.Water[i]);
+            Assert.True(p.RiverSize[i] >= 2);
+            // the mouth flows to the sea, possibly through further estuary tiles
+            int t = p.Downstream[i], steps = 0;
+            while (p.Estuary[t]) { t = p.Downstream[t]; Assert.True(++steps < 8); }
+            Assert.Equal(WaterBody.Ocean, p.Water[t]);
+        }
+        _out.WriteLine($"estuaries {n}");
+    }
+
+    [Fact]
     public void RiversGrowDownstream()
     {
         var p = Shared.Value;

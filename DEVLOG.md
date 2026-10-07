@@ -133,3 +133,55 @@ Changed:
 Bug fixed
 * Planet temperature and precipitation overlays looked pale and washed out
   * The colour ramps are authored in sRGB but were used as linear colours in the globe shader.
+
+## October 7th, 2026 - Feedback fixes, prototype look - Commit 7
+
+Added:
+* Traits change real stats (move/work/gather speed, shot spread, aim time, melee damage and accuracy, damage taken, hunger/thirst/fatigue rates, carrying capacity); hovering a trait lists its effects ("Move speed +15 %") instead of a description
+* One inventory grid per colonist whose size follows their carrying capacity (about one slot per kg of march load, 8 columns), plus the hands: drag between hands and grid, Equip / Take in hands / Put away / Eat / Drop
+* Arrows and melee blows hit colonists (body part, bleeding, death, messages)
+* Lakes: small enclosed water bodies are fresh lakes (own biome and colour), their shores get a lake beach on the local map like sea coasts
+* Estuaries: narrow sea inlets fed by a river become settleable river-mouth tiles instead of open ocean
+* Globe legend with every biome colour; region panel rows Water (Estuary, River/Creek, Coast, Lake shore, None), Ground moisture and average wind with explanations
+* Day/night bar under the clock (night, dawn, day, dusk from the real sun height for the latitude and season, sun/moon marker)
+* Autopilot steps: hover, hovertext, inv=putaway|equip:id, aim=on|off, expect=bowaway; integration scenarios check the overlay hover values, the lake, put away / re-equip, and the aim line at close and far zoom
+* Unit tests: inventory size and carrying capacity, trait effects, put away / re-equip, arrows hitting colonists, lakes, estuaries, doors left open
+
+Changed:
+* Colonists wear a white cotton T-shirt and jeans only (no satchel, pockets, jacket, cap, boots, glasses)
+* World look ported from the first prototype (RimworldTest): procedural terrain colours with organic cell blending and caustics, its water (depth colour, foam, continuous scrolling), grass clumps with flowers and its grass shading, small round oaks of painted leaf cards tinted per tree, bushes, bark, lighting (procedural sky, rosy dawn and blue night ambient, ACES, saturation, moonlight), camera field of view, pitch and tilt-shift depth of field
+* Colonists rebuilt in the prototype's readable style (big head, blinking eyes, rounded torso), 15 % larger
+* Globe: one flat colour per hexagonal region with crisp anti-aliased borders and no shading inside a biome, no clouds (kept on the menu backdrop), matte map shading, smoother and thinner rivers, 1024 px faces
+* Hovering the globe shows the active overlay's value (°C, m, mm/day) instead of always the temperature
+* Bow release sound: a sharp twang, limb knock and arrow whoosh, always audible (not attenuated by the camera height)
+* Autumn colours arrive during autumn instead of on its first day; crowns thin out in winter
+* Main menu: subtitle removed
+* Saves are version 2 (inventory and hands)
+* Autopilot presses E on closed doors in its way and never clicks through HUD panels while shooting; the integration goal scenario keeps the deer on the colonist's side of any water
+* Final integration run: unit tests 75/75, part 1 13/13, part 2 10/10 scenarios (no logged errors); 1000×1000 at 81 fps, 1500×1500 at 66 fps (RTX 3060 laptop, 1080p)
+
+Bug fixed
+* The bow did not appear in the hands after putting it away and equipping it again
+  * The inventory panel's change callback did nothing, so the hands section was never rebuilt.
+* Shooting or hitting another colonist did nothing
+  * Projectiles and melee only tested deer.
+* The aim line disappeared when zoomed far out
+  * Its fixed 7 cm width fell under one pixel; it now keeps its on-screen width and draws over trees.
+* Grass glittered and shimmered while the camera moved
+  * Clump positions and randomness were hashed from the window slot, so the whole field re-shuffled each time the window moved one cell.
+* Water moved stop-go while everything else was fluid
+  * The two-phase flow map restarted its phase over the whole river at once every 1.4 s.
+* Colonists held the bow the wrong way and aimed with their arms behind them
+  * Limb rotation signs were inverted and the bow was turned +90° instead of −90°; the bow now follows the body's facing.
+* Lakes were treated as open ocean and estuaries as sea
+  * Every tile below sea level was one kind of water; river mouths were left as ocean tiles.
+* A loud bubbling sound covered every other sound near water
+  * The water loop contained random rising "gurgle" blips.
+* Colonists closed a door the player had left open
+  * Walking through any open door scheduled it to swing shut.
+* Stack counts were cut off on narrow inventory items ("x2" for 24 arrows)
+  * The count was right-aligned and clipped to the item's width.
+* The time panel slid off the right edge of the screen with a long weather line
+  * It grew to the right from its anchor; it is now pinned by its bottom-right corner and grows left.
+* The integration goal scenario started on a meaningless tile
+  * It used another planet's start-tile index on a different planet.

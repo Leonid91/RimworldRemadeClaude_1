@@ -20,7 +20,7 @@ public static class TileInfo
         d.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         box.AddChild(d);
         box.AddChild(UiKit.Spacer(0, 6));
-        if (biome == Biome.Ocean)
+        if (p.Water[t] != WaterBody.None)
         {
             Row(box, "Depth", $"{-p.Elevation[t]:F0} m");
             Row(box, "Water temperature", UiKit.Temp(p.Climate.Temperature[t]));
@@ -32,15 +32,19 @@ public static class TileInfo
         float winter = p.Climate.SeasonalTemperature(t, lat >= 0 ? 0.875f : 0.375f);
         Row(box, "Terrain", BiomeInfo.HillLabel(p.Hills[t]));
         Row(box, "Elevation", $"{p.Elevation[t]:F0} m");
+        Row(box, "Water", WaterLabel(p, t), "Water on this region's map: the sea (coast), a lake shore, a river or creek crossing it,\nor an estuary — a large river widening into the sea.");
         Row(box, "Temperature now", $"{UiKit.Temp(sample.Temperature)}  ({GameTime.SeasonName(GameTime.SeasonAt(tick, lat)).ToLowerInvariant()})");
         Row(box, "Seasons", $"winter {UiKit.Temp(winter)} · summer {UiKit.Temp(summer)}");
         Row(box, "Annual mean", UiKit.Temp(p.MeanTemp[t]));
         Row(box, "Rainfall", $"{p.AnnualPrecip[t]:F0} mm / year");
         Row(box, "Precipitation now", $"{sample.Precipitation:F1} mm / day");
-        Row(box, "Soil moisture", $"{sample.SoilMoisture * 100:F0} %");
-        Row(box, "Wind", $"{sample.WindSpeed:F1} m/s");
-        Row(box, "River", BiomeInfo.RiverLabel(p.RiverSize[t]));
-        Row(box, "Coast", p.Coast[t] ? "Yes" : "No");
+        Row(box, "Ground moisture", $"{sample.SoilMoisture * 100:F0} %",
+            "How wet the ground is (rain soaks in, heat and wind dry it out). On the map it sets how lush the\n" +
+            "vegetation is, how many ponds and marshy patches there are, how wet the ground looks, and\nmorning fog on calm days.");
+        Row(box, "Wind", $"{p.TypicalWind(t):F0} m/s average  ·  {sample.WindSpeed:F0} m/s now",
+            "Average: the prevailing wind of this latitude (trade winds, westerlies, polar easterlies), weaker on\n" +
+            "high ground, plus passing weather systems. 'Now' changes hour by hour with the weather.\n" +
+            "On the map wind sways trees and grass, slants rain and snow, clears fog and dries the ground.");
         Row(box, "Location", $"{MathF.Abs(lat):F1}°{(lat >= 0 ? "N" : "S")}, {MathF.Abs(lon):F1}°{(lon >= 0 ? "E" : "W")}");
         box.AddChild(UiKit.Spacer(0, 8));
         bool playable = BiomeInfo.Playable(biome) && p.Hills[t] != Hilliness.Impassable;
@@ -48,14 +52,83 @@ public static class TileInfo
             15, playable ? UiKit.Good : UiKit.Warn));
     }
 
-    static void Row(VBoxContainer box, string k, string v)
+    /// <summary>The water features of a land tile: Estuary, River / Creek, Coast, Lake shore — or None.</summary>
+    public static string WaterLabel(WorldPlanet p, int t)
+    {
+        var parts = new System.Collections.Generic.List<string>();
+        if (p.Estuary[t]) parts.Add("Estuary");
+        else if (p.RiverSize[t] > 0) parts.Add(BiomeInfo.RiverLabel(p.RiverSize[t]));
+        if (p.Coast[t] && !p.Estuary[t]) parts.Add("Coast");
+        if (p.LakeShore[t]) parts.Add("Lake shore");
+        return parts.Count == 0 ? "None" : string.Join(" · ", parts);
+    }
+
+    static void Row(VBoxContainer box, string k, string v, string tip = null)
     {
         var r = UiKit.HBox(8);
         var kl = UiKit.Label(k, 15, UiKit.Muted);
         kl.CustomMinimumSize = new Vector2(150, 0);
         r.AddChild(kl);
         r.AddChild(UiKit.Label(v, 15));
+        if (tip != null)
+        {
+            r.TooltipText = tip;
+            r.MouseFilter = Control.MouseFilterEnum.Stop;
+            kl.Text += "  ⓘ";
+        }
         box.AddChild(r);
+    }
+}
+
+/// <summary>The small label that follows the cursor over the globe: the hovered tile and the active overlay's value.</summary>
+public partial class PlanetHoverTip : PanelContainer
+{
+    readonly PlanetView _view;
+    readonly Label _label;
+
+    public PlanetHoverTip(PlanetView view)
+    {
+        _view = view;
+        var sb = new StyleBoxFlat { BgColor = new Color(0.04f, 0.06f, 0.08f, 0.92f), ContentMarginLeft = 8, ContentMarginRight = 8, ContentMarginTop = 4, ContentMarginBottom = 4 };
+        sb.SetCornerRadiusAll(4);
+        AddThemeStyleboxOverride("panel", sb);
+        _label = UiKit.Label("", 14);
+        AddChild(_label);
+        Visible = false;
+        MouseFilter = MouseFilterEnum.Ignore;
+        Name = "HoverTip";
+        view.TileHovered += _ => Refresh();
+    }
+
+    public string Text => _label.Text;
+
+    void Refresh()
+    {
+        int t = _view.HoverTile;
+        if (t < 0) { Visible = false; return; }
+        _label.Text = Describe(_view.Planet, t, _view.Overlay);
+        Visible = true;
+        ResetSize();
+    }
+
+    /// <summary>Hover text: the biome, then the value of the active overlay in its own unit.</summary>
+    public static string Describe(WorldPlanet p, int t, PlanetBaker.OverlayKind overlay)
+    {
+        string name = BiomeInfo.Label(p.Biomes[t]);
+        bool water = p.Water[t] != WaterBody.None;
+        string value = overlay switch
+        {
+            PlanetBaker.OverlayKind.Temperature => UiKit.Temp(p.Climate.Temperature[t]),
+            PlanetBaker.OverlayKind.Elevation => water ? $"{-p.Elevation[t]:F0} m deep" : $"{p.Elevation[t]:F0} m",
+            PlanetBaker.OverlayKind.Precipitation => $"{p.Climate.Precipitation[t]:F1} mm/day",
+            _ => water ? null : TileInfo.WaterLabel(p, t) is var w && w != "None" ? w.ToLowerInvariant() : null,
+        };
+        return value == null ? name : $"{name}  ·  {value}";
+    }
+
+    public override void _Process(double delta)
+    {
+        if (Visible) Position = GetParent<Control>().GetLocalMousePosition() + new Vector2(18, 18);
     }
 }
 
@@ -67,6 +140,7 @@ public partial class OverlayBar : VBoxContainer
     readonly Control _legend;
     readonly Label _legendTitle, _legendMin, _legendMax;
     readonly TextureRect _ramp;
+    readonly Control _biomeLegend;
 
     public OverlayBar(PlanetView view)
     {
@@ -100,6 +174,8 @@ public partial class OverlayBar : VBoxContainer
         lv.AddChild(ends);
         _legend = lp;
         AddChild(lp);
+        _biomeLegend = BiomeLegend();
+        AddChild(_biomeLegend);
         Refresh();
     }
 
@@ -122,6 +198,7 @@ public partial class OverlayBar : VBoxContainer
             b.AddThemeColorOverride("font_color", on ? UiKit.Accent : UiKit.Text);
         }
         _legend.Visible = k != PlanetBaker.OverlayKind.None;
+        _biomeLegend.Visible = !_legend.Visible;
         if (!_legend.Visible) return;
         Color[] stops = k switch
         {
@@ -143,6 +220,27 @@ public partial class OverlayBar : VBoxContainer
     }
 
     static Color C(float r, float g, float b) => new(r, g, b);
+
+    /// <summary>Colour chips for every biome, in the exact colours of the globe.</summary>
+    static Control BiomeLegend()
+    {
+        var lp = UiKit.Panel(null, null, 8);
+        lp.Name = "BiomeLegend";
+        var grid = new GridContainer { Columns = 3 };
+        grid.AddThemeConstantOverride("h_separation", 14);
+        grid.AddThemeConstantOverride("v_separation", 4);
+        foreach (var b in new[] { Biome.Ocean, Biome.Lake, Biome.IceSheet, Biome.Tundra, Biome.BorealForest, Biome.TemperateForest,
+                                  Biome.Grassland, Biome.Savanna, Biome.AridShrubland, Biome.Desert, Biome.TropicalRainforest })
+        {
+            var row = UiKit.HBox(6);
+            var c = PlanetBaker.BiomeColor(b);
+            row.AddChild(new ColorRect { Color = new Color(c.X, c.Y, c.Z), CustomMinimumSize = new Vector2(16, 14) });
+            row.AddChild(UiKit.Label(BiomeInfo.Label(b), 13, UiKit.Text));
+            grid.AddChild(row);
+        }
+        lp.AddChild(grid);
+        return lp;
+    }
 }
 
 /// <summary>Landing-site selection on the rotating globe, then map size and Play.</summary>
@@ -154,8 +252,7 @@ public partial class PlanetScreen : Control
     readonly Button _next;
     readonly PanelContainer _sizePanel;
     Button _play;
-    Label _hoverLabel;
-    readonly PanelContainer _hoverTip;
+    readonly PlanetHoverTip _hoverTip;
 
     public static readonly (int size, string name, string note)[] MapSizes =
     {
@@ -171,7 +268,7 @@ public partial class PlanetScreen : Control
     {
         UiKit.Fill(this);
         var setup = Main.I.Setup;
-        _view = UiKit.Fill(new PlanetView(768));
+        _view = UiKit.Fill(new PlanetView(1024));
         AddChild(_view);
         _view.SetPlanet(setup.Planet, () =>
         {
@@ -179,7 +276,6 @@ public partial class PlanetScreen : Control
             if (start >= 0) _view.FocusTile(start, 2.9f);
         });
         _view.TileSelected += OnSelected;
-        _view.TileHovered += OnHovered;
 
         var title = UiKit.Label("CHOOSE A LANDING SITE", 30, UiKit.Text, bold: true);
         title.Position = new Vector2(40, 28);
@@ -201,11 +297,7 @@ public partial class PlanetScreen : Control
         overlays.Position = new Vector2(-560, 30);
         AddChild(overlays);
 
-        _hoverTip = UiKit.Panel(null, null, 6);
-        _hoverLabel = UiKit.Label("", 14);
-        _hoverTip.AddChild(_hoverLabel);
-        _hoverTip.Visible = false;
-        _hoverTip.MouseFilter = MouseFilterEnum.Ignore;
+        _hoverTip = new PlanetHoverTip(_view);
         AddChild(_hoverTip);
 
         var back = UiKit.Button("Back", () => Main.I.ShowWorldGen(), 18, 160);
@@ -226,18 +318,7 @@ public partial class PlanetScreen : Control
         AddChild(_sizePanel);
     }
 
-    void OnHovered(int t)
-    {
-        if (t < 0) { _hoverTip.Visible = false; return; }
-        var p = Main.I.Setup.Planet;
-        _hoverLabel.Text = $"{BiomeInfo.Label(p.Biomes[t])}  ·  {UiKit.Temp(p.Climate.Temperature[t])}" + (p.RiverSize[t] > 0 ? "  ·  river" : "");
-        _hoverTip.Visible = true;
-    }
-
-    public override void _Process(double delta)
-    {
-        if (_hoverTip.Visible) _hoverTip.Position = GetLocalMousePosition() + new Vector2(18, 18);
-    }
+    public PlanetHoverTip HoverTip => _hoverTip;
 
     void OnSelected(int t)
     {

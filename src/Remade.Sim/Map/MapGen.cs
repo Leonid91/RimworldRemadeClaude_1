@@ -21,6 +21,9 @@ public sealed class TileFeatures
     public Vector2? RiverOut;
     /// <summary>Map-space directions toward neighbouring sea tiles.</summary>
     public List<Vector2> SeaDirs = new();
+    /// <summary>Map-space directions toward neighbouring lake tiles (fresh water shores).</summary>
+    public List<Vector2> LakeDirs = new();
+    public bool Estuary;
     public float AnnualPrecip, MeanTemp, Soil;
     public float Latitude, Longitude;
 
@@ -30,7 +33,7 @@ public sealed class TileFeatures
         {
             Biome = p.Biomes[tile], Hills = p.Hills[tile], Ruggedness = p.Ruggedness[tile], RiverSize = p.RiverSize[tile],
             AnnualPrecip = p.AnnualPrecip[tile], MeanTemp = p.MeanTemp[tile], Soil = p.Climate.Soil[tile],
-            Latitude = p.Grid.Latitude(tile), Longitude = p.Grid.Longitude(tile),
+            Latitude = p.Grid.Latitude(tile), Longitude = p.Grid.Longitude(tile), Estuary = p.Estuary[tile],
         };
         p.Grid.Frame(tile, out var east, out var north);
         Vector3 c = p.Grid.Centers[tile];
@@ -41,7 +44,8 @@ public sealed class TileFeatures
         }
         foreach (int nb in p.Grid.Neighbors(tile))
         {
-            if (p.Elevation[nb] < 0) f.SeaDirs.Add(Dir(nb));
+            if (p.Water[nb] == WaterBody.Ocean) f.SeaDirs.Add(Dir(nb));
+            if (p.Water[nb] == WaterBody.Lake) f.LakeDirs.Add(Dir(nb));
             if (p.Downstream[nb] == tile && p.RiverSize[nb] > 0) f.RiverIn.Add(Dir(nb));
         }
         if (f.RiverSize > 0 && p.Downstream[tile] >= 0) f.RiverOut = Dir(p.Downstream[tile]);
@@ -100,18 +104,22 @@ public static class MapGen
         Array.Fill(riverDist, float.MaxValue);
         float riverHalfWidth = feat.RiverSize switch { 0 => 0, 1 => 2.6f, 2 => 5f, _ => 8.5f };
 
-        if (feat.SeaDirs.Count > 0)
+        // shores: the sea on ocean sides, a lake on lake sides (fresh water); the larger one wins where both exist
+        var shoreDirs = feat.SeaDirs.Count >= feat.LakeDirs.Count ? feat.SeaDirs : feat.LakeDirs;
+        bool freshShore = shoreDirs == feat.LakeDirs && feat.LakeDirs.Count > 0;
+        if (shoreDirs.Count > 0)
         {
             Vector2 seaDir = Vector2.Zero;
-            foreach (var d in feat.SeaDirs) seaDir += d;
-            seaDir = seaDir.LengthSquared() < 1e-4f ? feat.SeaDirs[0] : Vector2.Normalize(seaDir);
-            float spread = 0.22f + 0.08f * feat.SeaDirs.Count; // more sea neighbours → more sea on the map
+            foreach (var d in shoreDirs) seaDir += d;
+            seaDir = seaDir.LengthSquared() < 1e-4f ? shoreDirs[0] : Vector2.Normalize(seaDir);
+            float spread = 0.22f + 0.08f * shoreDirs.Count; // more water neighbours → more water on the map
+            if (feat.Estuary) spread *= 0.6f;               // a river mouth: the sea only at the map's edge
             Parallel.For(0, H, y =>
             {
                 for (int x = 0; x < W; x++)
                 {
                     Vector2 p = new(x + 0.5f, y + 0.5f);
-                    float proj = Vector2.Dot(p - center, seaDir) / (size * 0.5f); // -1..1 toward the sea
+                    float proj = Vector2.Dot(p - center, seaDir) / (size * 0.5f); // -1..1 toward the water
                     float wobble = noise.Fbm(x * 0.012f, y * 0.012f, 4) * 0.22f + noise2.Get(x * 0.05f, y * 0.05f) * 0.04f;
                     float edge = 1f - spread * 2f + wobble;
                     seaDepth[y * W + x] = (proj - edge) * size * 0.5f;
@@ -123,7 +131,7 @@ public static class MapGen
         var riverPolys = new List<List<Vector2>>();
         if (feat.RiverSize > 0)
         {
-            Vector2 outDir = feat.RiverOut ?? (feat.SeaDirs.Count > 0 ? feat.SeaDirs[0] : new Vector2(0, 1));
+            Vector2 outDir = feat.RiverOut ?? (feat.SeaDirs.Count > 0 ? feat.SeaDirs[0] : feat.LakeDirs.Count > 0 ? feat.LakeDirs[0] : new Vector2(0, 1));
             Vector2 exit = EdgePoint(center, outDir, W, H);
             Vector2 meet = center + outDir * (size * 0.12f) + new Vector2(rng.Range(-0.08f, 0.08f), rng.Range(-0.08f, 0.08f)) * size;
             var inflows = feat.RiverIn.Count > 0 ? feat.RiverIn : new List<Vector2> { -outDir };
@@ -146,7 +154,7 @@ public static class MapGen
         Array.Fill(pond, 9f);
         {
             int count = (int)(W * H / 45000f * (0.4f + feat.Soil)) + 1;
-            bool waterNear = feat.RiverSize > 0 || feat.SeaDirs.Count > 0;
+            bool waterNear = feat.RiverSize > 0 || feat.LakeDirs.Count > 0;
             for (int k = 0; k < count + (waterNear ? 0 : 1); k++)
             {
                 bool guaranteed = !waterNear && k == count;
@@ -246,7 +254,7 @@ public static class MapGen
                 Terrain t = Terrain.Soil;
                 float sd = seaDepth[i];
                 float rd = riverDist[i];
-                if (sd > 0) t = sd > 9f ? Terrain.OceanDeep : Terrain.OceanShallow;
+                if (sd > 0) t = freshShore ? (sd > 9f ? Terrain.LakeDeep : Terrain.LakeShallow) : (sd > 9f ? Terrain.OceanDeep : Terrain.OceanShallow);
                 else if (rd < riverHalfWidth) t = rd < riverHalfWidth * 0.55f && riverHalfWidth > 3f ? Terrain.RiverDeep : Terrain.RiverShallow;
                 else if (pond[i] < 1f) t = pond[i] < 0.55f ? Terrain.LakeDeep : Terrain.LakeShallow;
                 else

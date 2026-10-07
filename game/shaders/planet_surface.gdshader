@@ -9,6 +9,7 @@ uniform samplerCube overlay_map : filter_linear, repeat_disable;         // r = 
 uniform int overlay_mode = 0;      // 0 none, 1 temperature, 2 elevation, 3 precipitation
 uniform float overlay_strength = 0.92;
 uniform float time_scroll = 0.0;
+uniform bool map_style = false; // flat map look (landing site, in-game planet): matte water, no sun glare
 uniform int debug_mode = 0; // 1: agreement of baked normal with the geometric normal (white = correct)
 
 varying vec3 obj_pos;
@@ -92,8 +93,8 @@ void fragment() {
 	}
 	ALBEDO = col;
 	NORMAL = normalize((VIEW_MATRIX * MODEL_MATRIX * vec4(n_obj, 0.0)).xyz);
-	ROUGHNESS = water && overlay_mode == 0 ? 0.28 : 0.85;
-	SPECULAR = water ? 0.6 : 0.25;
+	ROUGHNESS = map_style ? 0.9 : (water && overlay_mode == 0 ? 0.28 : 0.85);
+	SPECULAR = map_style ? 0.12 : (water ? 0.6 : 0.25);
 	METALLIC = 0.0;
 	// a hint of rim light on the night side so the globe never reads as a flat disk
 	float rim = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);

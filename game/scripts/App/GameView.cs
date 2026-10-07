@@ -165,6 +165,7 @@ public partial class GameView : Node3D
         _map.UpdateStreaming(rect, _frame);
         _flora.UpdateStreaming(rect, _frame);
         _flora.UpdateGrass(focus, _cam.Distance);
+        _map.SetCameraDistance(_cam.Distance);
         _map.AnimateDoors(dt);
         _light.Update(dt, focus, _cam.Distance);
         _weather.Update(focus);
@@ -174,9 +175,12 @@ public partial class GameView : Node3D
         if (reveal != null)
         {
             var rp = _entities.PawnVisualPos(reveal);
-            RenderingServer.GlobalShaderParameterSet("reveal_pos", new Vector4(rp.X, rp.Y, rp.Z, controlled != null ? 7.5f : 4.5f));
+            // line-of-sight cut through canopies between the camera and the colonist (radius in metres)
+            RenderingServer.GlobalShaderParameterSet("reveal_pos", new Vector4(rp.X, rp.Y, rp.Z, controlled != null ? 2.2f : 1.6f));
         }
+        else RenderingServer.GlobalShaderParameterSet("reveal_pos", new Vector4(0, -100, 0, 0));
         _entities.ShowAim = controlled != null && _aiming;
+        _entities.CamDistance = _cam.Distance;
         _entities.AimRange = controlled != null ? GameSim.AttackRange(controlled) : 0;
         _entities.Update(dt);
         UpdateHudOverlays(controlled);
@@ -254,6 +258,9 @@ public partial class GameView : Node3D
         var md = v == Vector2.Zero ? Vector2.Zero : _cam.ScreenToMapDir(v.Normalized());
         inp.Move = new SV2(md.X, md.Y);
         inp.Sprint = Input.IsActionPressed("sprint");
+        // the button state is resynchronised every frame: a release that landed on a HUD control (or happened while
+        // zooming) must not leave aiming stuck on or off
+        if (_rmbDown && !Input.IsMouseButtonPressed(MouseButton.Right) && MouseOverride == null) { _rmbDown = false; _aiming = false; }
         // holding the right button past a short click = aiming
         if (_rmbDown && !_aiming && Time.GetTicksMsec() / 1000.0 - _rmbTime > 0.18) _aiming = true;
         inp.Aim = _aiming;

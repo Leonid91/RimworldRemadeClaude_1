@@ -1,32 +1,33 @@
-// Oak bark: furrowed procedural bark texture, wind sway matching the canopy, snow and wetness.
+// Oak bark (first prototype's look): two browns mixed by stretched noise, darker at the root, sways with the canopy,
+// snow on top, wet and cloud-shadowed. UV.y runs along the trunk and limbs.
 shader_type spatial;
-render_mode diffuse_burley, specular_schlick_ggx, world_vertex_coords;
+render_mode world_vertex_coords, diffuse_burley;
 
 #include "res://shaders/world_common.gdshaderinc"
 
-uniform sampler2D bark : source_color, filter_linear_mipmap, repeat_enable;
+uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
+uniform vec3 col_a : source_color = vec3(0.24, 0.18, 0.12);
+uniform vec3 col_b : source_color = vec3(0.42, 0.33, 0.24);
+uniform float sway_amount = 1.0;
 
-varying vec3 wpos;
-varying float cloud;
+varying vec3 vorigin;
+varying float vup;
 
 void vertex() {
 	vec3 origin = MODEL_MATRIX[3].xyz;
-	float h = max(VERTEX.y - origin.y, 0.0);
-	vec2 sway = wind_sway(origin, h * 0.12, 1.0) * (0.35 + COLOR.r * 0.65);
-	VERTEX.xz += sway;
-	wpos = VERTEX;
-	cloud = cloud_shadow(origin.xz);
+	vorigin = origin;
+	VERTEX += tree_sway(noise_tex, VERTEX, origin, fract(INSTANCE_CUSTOM.a * 2.0) * 6.2831, sway_amount);
+	vup = NORMAL.y;
 }
 
 void fragment() {
-	vec4 b = texture(bark, UV * vec2(1.0, 1.0));
-	vec3 col = b.rgb * (0.8 + COLOR.g * 0.4);
-	col *= 1.0 - wetness * 0.35;
-	float up = clamp((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).y, 0.0, 1.0);
-	col = mix(col, vec3(0.88, 0.9, 0.94), snow_cover * smoothstep(0.5, 0.9, up));
-	col *= cloud;
-	ALBEDO = col;
-	ROUGHNESS = mix(0.9, 0.6, wetness);
-	NORMAL_MAP_DEPTH = 0.0;
-	AO = mix(0.6, 1.0, b.a);
+	float s = texture(noise_tex, vec2(UV.x * 1.5, UV.y * 0.12)).r;
+	float s2 = texture(noise_tex, vec2(UV.x * 4.0, UV.y * 0.5)).b;
+	vec3 c = mix(col_a, col_b, s * 0.7 + s2 * 0.3);
+	c *= mix(0.6, 1.0, smoothstep(0.0, 0.7, UV.y));
+	c = mix(c, vec3(0.6, 0.64, 0.71), snow_cover * smoothstep(0.5, 0.9, vup) * 0.8);
+	c *= cloud_shadow(vorigin.xz) * 0.6 + 0.4;
+	c *= mix(1.0, 0.7, wetness);
+	ALBEDO = c;
+	ROUGHNESS = 0.9;
 }

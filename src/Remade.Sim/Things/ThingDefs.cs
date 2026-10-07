@@ -91,58 +91,18 @@ public static class Defs
         Color = 0x8A8480, Description = "A heavy block of granite broken off while mining.",
     });
 
+    // Everyone starts in a white cotton T-shirt (~0.2 kg) and jeans (~0.7 kg); no other apparel exists yet.
     public static readonly ThingDef TShirt = Add(new ThingDef
     {
-        Id = "tshirt", Label = "cotton T-shirt", Kind = ThingKind.Apparel, Mass = 0.2f, GridW = 2, GridH = 2, Color = 0x7C8C70,
+        Id = "tshirt", Label = "white cotton T-shirt", Kind = ThingKind.Apparel, Mass = 0.2f, GridW = 2, GridH = 2, Color = 0xECEBE6,
         Layers = new[] { ApparelLayer.Skin },
         Covers = new[] { BodyRegion.Torso, BodyRegion.Neck, BodyRegion.ShoulderL, BodyRegion.ShoulderR },
     });
 
-    public static readonly ThingDef Trousers = Add(new ThingDef
+    public static readonly ThingDef Jeans = Add(new ThingDef
     {
-        Id = "trousers", Label = "canvas trousers", Kind = ThingKind.Apparel, Mass = 0.6f, GridW = 2, GridH = 2, Color = 0x4F5866,
+        Id = "jeans", Label = "jeans", Kind = ThingKind.Apparel, Mass = 0.7f, GridW = 2, GridH = 2, Color = 0x3E5C86,
         Layers = new[] { ApparelLayer.Skin },
         Covers = new[] { BodyRegion.Waist, BodyRegion.LegL, BodyRegion.LegR },
-        ContainerW = 4, ContainerH = 2, ContainerLabel = "Trouser pockets",
-    });
-
-    public static readonly ThingDef Jacket = Add(new ThingDef
-    {
-        Id = "jacket", Label = "waxed jacket", Kind = ThingKind.Apparel, Mass = 1.1f, GridW = 2, GridH = 3, Color = 0x6B5B3E,
-        Layers = new[] { ApparelLayer.Outer },
-        Covers = new[] { BodyRegion.Torso, BodyRegion.Neck, BodyRegion.ShoulderL, BodyRegion.ShoulderR, BodyRegion.ArmL, BodyRegion.ArmR },
-        ContainerW = 2, ContainerH = 2, ContainerLabel = "Jacket pockets",
-    });
-
-    public static readonly ThingDef Shirt = Add(new ThingDef
-    {
-        Id = "shirt", Label = "flannel shirt", Kind = ThingKind.Apparel, Mass = 0.35f, GridW = 2, GridH = 2, Color = 0x8E3B33,
-        Layers = new[] { ApparelLayer.Middle },
-        Covers = new[] { BodyRegion.Torso, BodyRegion.Neck, BodyRegion.ShoulderL, BodyRegion.ShoulderR, BodyRegion.ArmL, BodyRegion.ArmR },
-    });
-
-    public static readonly ThingDef Cap = Add(new ThingDef
-    {
-        Id = "cap", Label = "wool cap", Kind = ThingKind.Apparel, Mass = 0.1f, GridW = 1, GridH = 1, Color = 0x3E4A5C,
-        Layers = new[] { ApparelLayer.Headgear }, Covers = new[] { BodyRegion.Head },
-    });
-
-    public static readonly ThingDef Boots = Add(new ThingDef
-    {
-        Id = "boots", Label = "leather boots", Kind = ThingKind.Apparel, Mass = 1.4f, GridW = 2, GridH = 2, Color = 0x4A3426,
-        Layers = new[] { ApparelLayer.Outer }, Covers = new[] { BodyRegion.FootL, BodyRegion.FootR },
-    });
-
-    public static readonly ThingDef Glasses = Add(new ThingDef
-    {
-        Id = "glasses", Label = "reading glasses", Kind = ThingKind.Apparel, Mass = 0.03f, GridW = 1, GridH = 1, Color = 0x222222,
-        Layers = new[] { ApparelLayer.Eyes }, Covers = new[] { BodyRegion.Eyes },
-    });
-
-    public static readonly ThingDef Satchel = Add(new ThingDef
-    {
-        Id = "satchel", Label = "leather satchel", Kind = ThingKind.Apparel, Mass = 0.8f, GridW = 2, GridH = 2, Color = 0x7A5230,
-        Layers = new[] { ApparelLayer.Belt }, Covers = new[] { BodyRegion.Waist },
-        ContainerW = 6, ContainerH = 4, ContainerLabel = "Satchel",
     });
 }

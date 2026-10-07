@@ -91,13 +91,8 @@ public static class PawnGenerator
     static void Dress(Pawn p, ref Rng rng, Func<int> newId)
     {
         p.Wear(new Item(newId(), Defs.TShirt, 1));
-        p.Wear(new Item(newId(), Defs.Trousers, 1));
-        p.Wear(new Item(newId(), Defs.Boots, 1));
-        if (rng.Chance(0.6f)) p.Wear(new Item(newId(), Defs.Shirt, 1));
-        if (rng.Chance(0.5f)) p.Wear(new Item(newId(), Defs.Jacket, 1));
-        if (rng.Chance(0.35f)) p.Wear(new Item(newId(), Defs.Cap, 1));
-        if (p.BioAge > 45 && rng.Chance(0.5f)) p.Wear(new Item(newId(), Defs.Glasses, 1));
-        p.Wear(new Item(newId(), Defs.Satchel, 1));
+        p.Wear(new Item(newId(), Defs.Jeans, 1));
+        p.CreateInventory();
     }
 
     public static List<Pawn> GenerateGroup(int count, int seed, Func<int> newId)

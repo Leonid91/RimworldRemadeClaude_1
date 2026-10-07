@@ -34,6 +34,8 @@ public partial class EntityRenderer : Node3D
     public Interaction Target;
     public bool ShowAim;
     public float AimRange;
+    /// <summary>Camera distance: the aim line keeps a constant on-screen width (it would vanish under a pixel when zoomed out).</summary>
+    public float CamDistance = 34f;
 
     public EntityRenderer(GameSim sim)
     {
@@ -47,7 +49,10 @@ public partial class EntityRenderer : Node3D
         _selRing = new MeshInstance3D { Mesh = Ring(0.55f, 0.07f), MaterialOverride = Glow(new Color(0.45f, 1f, 0.9f), 2f), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Visible = false };
         _targetRing = new MeshInstance3D { Mesh = Ring(0.5f, 0.05f), MaterialOverride = Glow(new Color(1f, 0.8f, 0.35f), 2.5f), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Visible = false };
         AddChild(_selRing); AddChild(_targetRing);
-        _aimLine = new MeshInstance3D { Mesh = _aimMesh, MaterialOverride = Glow(new Color(1f, 0.12f, 0.08f), 3f), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+        var aimMat = Glow(new Color(1f, 0.12f, 0.08f), 3f);
+        aimMat.NoDepthTest = true;   // drawn over trees and terrain
+        aimMat.RenderPriority = 20;
+        _aimLine = new MeshInstance3D { Mesh = _aimMesh, MaterialOverride = aimMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
         AddChild(_aimLine);
     }
 
@@ -239,7 +244,8 @@ public partial class EntityRenderer : Node3D
             var p = Selected;
             var from = p.Position;
             var dir = p.AimDir;
-            var side = new SV2(-dir.Y, dir.X) * 0.035f;
+            float halfWidth = Math.Max(0.035f, CamDistance * 0.0016f);
+            var side = new SV2(-dir.Y, dir.X) * halfWidth;
             _aimMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
             int steps = Math.Max(2, (int)(AimRange / 0.5f));
             for (int s = 0; s < steps; s++)
@@ -252,8 +258,8 @@ public partial class EntityRenderer : Node3D
             }
             // range tick at the end
             var end = from + dir * AimRange;
-            var tick = new SV2(-dir.Y, dir.X) * 0.35f;
-            var along = dir * 0.05f;
+            var tick = new SV2(-dir.Y, dir.X) * Math.Max(0.35f, halfWidth * 8f);
+            var along = dir * Math.Max(0.05f, halfWidth * 1.4f);
             float he = _map.StandHeight(end.X, end.Y) + 0.07f;
             Quad(new Vector3(end.X - tick.X - along.X, he, end.Y - tick.Y - along.Y), new Vector3(end.X + tick.X - along.X, he, end.Y + tick.Y - along.Y),
                  new Vector3(end.X + tick.X + along.X, he, end.Y + tick.Y + along.Y), new Vector3(end.X - tick.X + along.X, he, end.Y - tick.Y + along.Y));

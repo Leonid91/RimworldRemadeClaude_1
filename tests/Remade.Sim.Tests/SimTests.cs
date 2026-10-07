@@ -292,7 +292,9 @@ public class PawnTests
             Assert.InRange(p.Traits.Count, 1, 3);
             foreach (var t in p.Traits) foreach (var c in t.Conflicts) Assert.False(p.HasTrait(c));
             Assert.InRange(p.BodyMassKg, 40f, 130f);
-            Assert.Contains(p.Containers, g => g.Label == "Satchel");
+            Assert.Equal(new[] { Defs.TShirt, Defs.Jeans }, p.Apparel.Select(a => a.Def).OrderBy(d => d.Id == "jeans").ToArray());
+            Assert.NotNull(p.Inventory);
+            Assert.Null(p.Held);
             Assert.Equal(p.AgeLabel.Contains('('), p.BioAge != p.ChronoAge);
         }
     }
@@ -302,24 +304,51 @@ public class PawnTests
     {
         var p = new Pawn { BodyMassKg = 70 };
         p.Wear(new Item(NewId(), Defs.TShirt, 1));
-        Assert.Empty(p.WearConflicts(Defs.Shirt));   // middle layer over a skin layer: fine
-        Assert.Empty(p.WearConflicts(Defs.Jacket));  // outer layer: fine
+        Assert.Empty(p.WearConflicts(Defs.Jeans));   // legs, not the torso: fine
         Assert.Single(p.WearConflicts(Defs.TShirt)); // another skin top: conflict
-        p.Wear(new Item(NewId(), Defs.Shirt, 1));
-        Assert.Equal(Defs.Shirt, p.WornAt(ApparelLayer.Middle, BodyRegion.Torso).Def);
-        Assert.Null(p.WornAt(ApparelLayer.Eyes, BodyRegion.Eyes));
+        p.Wear(new Item(NewId(), Defs.Jeans, 1));
+        Assert.Equal(Defs.Jeans, p.WornAt(ApparelLayer.Skin, BodyRegion.LegL).Def);
+        Assert.Null(p.WornAt(ApparelLayer.Outer, BodyRegion.Torso));
     }
 
     [Fact]
     public void EncumbranceFollowsBodyMassFractions()
     {
         var p = new Pawn { BodyMassKg = 80 };
-        p.Wear(new Item(NewId(), Defs.Satchel, 1));
+        p.CreateInventory();
         Assert.Equal(Encumbrance.Unencumbered, p.EncumbranceLevel);
-        var sat = p.Apparel[0].Contents;
-        for (int i = 0; i < 4; i++) sat.TryInsert(new Item(NewId(), Defs.Venison, 10)); // 20 kg
-        Assert.Equal(Encumbrance.Encumbered, p.EncumbranceLevel); // 20.8 kg / 80 = 26 %
+        for (int i = 0; i < 4; i++) Assert.True(p.Inventory.TryInsert(new Item(NewId(), Defs.Venison, 10))); // 20 kg
+        Assert.Equal(Encumbrance.Unencumbered, p.EncumbranceLevel); // 20 kg / 80 kg = 25 %: the comfortable limit
+        Assert.True(p.Inventory.TryInsert(new Item(NewId(), Defs.Berries, 10)));
+        Assert.Equal(Encumbrance.Encumbered, p.EncumbranceLevel);
         Assert.True(p.SpeedFactorFromLoad < 1f && p.SpeedFactorFromLoad > 0.75f);
+    }
+
+    [Fact]
+    public void InventorySizeFollowsCarryingCapacity()
+    {
+        var light = new Pawn { BodyMassKg = 50 }; light.CreateInventory();
+        var heavy = new Pawn { BodyMassKg = 110 }; heavy.CreateInventory();
+        var strong = new Pawn { BodyMassKg = 50 }; strong.Traits.Add(Traits.Get("strong_back")); strong.CreateInventory();
+        Assert.True(heavy.Inventory.H > light.Inventory.H);
+        Assert.Equal(60f, strong.CarryBasisKg, 3);
+        Assert.True(strong.Inventory.H >= light.Inventory.H);
+        Assert.Equal(Pawn.InventoryColumns, light.Inventory.W);
+    }
+
+    [Fact]
+    public void EveryTraitHasVisibleStatEffects()
+    {
+        foreach (var t in Traits.All)
+        {
+            Assert.NotEmpty(t.Effects);
+            string text = t.EffectsText();
+            Assert.False(string.IsNullOrWhiteSpace(text), t.Id);
+            Assert.Contains("%", text);
+        }
+        var p = new Pawn { BodyMassKg = 70 };
+        p.Traits.Add(Traits.Get("jogger"));
+        Assert.True(p.MoveSpeed(false) > new Pawn { BodyMassKg = 70 }.MoveSpeed(false));
     }
 
     [Fact]
@@ -434,7 +463,7 @@ public class SimTests
         var pick = Interactions.Nearby(sim, pawn).First(i => i.Item == bow);
         Interactions.Execute(sim, pawn, pick);
         Run(sim, 60);
-        Assert.Equal(bow, pawn.Weapon);
+        Assert.Equal(bow, pawn.Held);
         foreach (var arrows in sim.Items.Where(i => i.Def == Defs.Arrow).ToList())
         {
             WalkTo(sim, pawn, arrows.Position, stopAt: 0.9f);
@@ -509,6 +538,69 @@ public class SimTests
     }
 }
 
+public class EquipAndCombatTests
+{
+    static void Run(GameSim sim, int ticks) { for (int i = 0; i < ticks; i++) sim.Step(); }
+
+    [Fact]
+    public void PutAwayAndReEquipKeepsTheBowInTheHands()
+    {
+        var sim = Fixtures.NewSim();
+        var p = sim.Pawns[0];
+        var bow = sim.Items.First(i => i.Def == Defs.Bow);
+        sim.Despawn(bow);
+        p.Held = bow;
+        sim.Unequip(p);
+        Assert.Null(p.Held);
+        Assert.Contains(p.Inventory.Entries, e => e.Item == bow);
+        Assert.False(p.HasRangedWeapon);
+        sim.EquipFromInventory(p, bow);
+        Assert.Equal(bow, p.Held);
+        Assert.DoesNotContain(p.Inventory.Entries, e => e.Item == bow);
+        Assert.True(p.HasRangedWeapon);
+    }
+
+    [Fact]
+    public void EquippingSomethingElsePutsTheHeldItemAway()
+    {
+        var sim = Fixtures.NewSim();
+        var p = sim.Pawns[0];
+        var bow = sim.Items.First(i => i.Def == Defs.Bow);
+        sim.Despawn(bow);
+        p.Held = bow;
+        var meat = new Item(sim.NewId(), Defs.Venison, 3);
+        Assert.True(p.Inventory.TryInsert(meat));
+        sim.EquipFromInventory(p, meat);
+        Assert.Equal(meat, p.Held);
+        Assert.Contains(p.Inventory.Entries, e => e.Item == bow);
+    }
+
+    [Fact]
+    public void ArrowsHitColonistsToo()
+    {
+        var sim = Fixtures.NewSim();
+        var shooter = sim.Pawns[0];
+        var target = sim.Pawns[1];
+        var bow = sim.Items.First(i => i.Def == Defs.Bow);
+        sim.Despawn(bow);
+        shooter.Held = bow;
+        Assert.True(shooter.Inventory.TryInsert(new Item(sim.NewId(), Defs.Arrow, 10)));
+        // the target stands 1.6 m east of the shooter
+        var a = shooter.Position;
+        float before = target.Health.Summary;
+        int hits = 0;
+        for (int shot = 0; shot < 8 && hits == 0; shot++)
+        {
+            target.Position = a + new Vector2(1.6f, 0); target.Path.Clear(); target.Job = null;
+            shooter.Position = a; shooter.WeaponCooldown = 0;
+            sim.Attack(shooter, new Vector2(1, 0), moving: false);
+            Run(sim, 10);
+            if (target.Health.Summary < before) hits++;
+        }
+        Assert.True(hits > 0, "no arrow hit the colonist");
+    }
+}
+
 public class SaveTests : IDisposable
 {
     readonly string _dir = Path.Combine(Path.GetTempPath(), "remade_save_" + Guid.NewGuid().ToString("N")[..6]);
@@ -579,6 +671,29 @@ public class DirectControlTests
         sim.Input.Move = Vector2.Normalize(new Vector2(-1f, -0.25f)); // west and slightly north, into the wall corner
         for (int t = 0; t < 120 && p.Position.X > 9.5f; t++) sim.Step();
         Assert.True(p.Position.X < 10f, $"stuck at {p.Position}");
+    }
+
+    /// <summary>A door the player left open must stay open after another colonist walks through it.</summary>
+    [Fact]
+    public void ColonistsDoNotCloseADoorLeftOpen()
+    {
+        var planet = new Planet(new WorldParams { Seed = 1, Frequency = 16 });
+        var map = new LocalMap(20, 20, 0, 1);
+        for (int y = 0; y < 20; y++) map.Buildings[map.Index(10, y)] = Building.WoodWall;
+        int door = map.Index(10, 10);
+        map.Buildings[door] = Building.Door;
+        map.DoorOpen[door] = true;
+        var sim = new GameSim(planet, map, 1);
+        int id = 1;
+        var p = PawnGenerator.GenerateGroup(1, 3, () => id++)[0];
+        p.Position = new Vector2(13.5f, 10.5f);
+        sim.Pawns.Add(p);
+        sim.SetMode(p, ControlMode.Drafted);
+        sim.StartJob(p, new Job { Kind = JobKind.Goto, TargetCell = map.Index(6, 10), Forced = true });
+        for (int t = 0; t < 600 && p.Position.X > 7f; t++) sim.Step();
+        Assert.True(p.Position.X < 7.5f, $"did not get through: {p.Position}");
+        for (int t = 0; t < 200; t++) sim.Step();
+        Assert.True(sim.Map.DoorOpen[door]);
     }
 }
 

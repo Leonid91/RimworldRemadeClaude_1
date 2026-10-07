@@ -130,7 +130,7 @@ public partial class PlanetView : SubViewportContainer
         HoverTile = SelectedTile = -1;
         _bakeTask = Task.Run(() =>
         {
-            var b = new PlanetBaker(planet, _bakeSize);
+            var b = new PlanetBaker(planet, _bakeSize, natural: Mode == CameraMode.MenuLimb);
             b.Bake();
             return b;
         });
@@ -167,7 +167,9 @@ public partial class PlanetView : SubViewportContainer
         _surfaceMat.SetShaderParameter("normal_map", MakeCube(b.Normal, b.Size, Image.Format.Rgba8, mipmaps: true));
         _overlayTex = MakeCube(BlankFaces(8), 8, Image.Format.R8, false);
         _surfaceMat.SetShaderParameter("overlay_map", _overlayTex);
-        _globe.Visible = _clouds.Visible = _atmo.Visible = true;
+        _surfaceMat.SetShaderParameter("map_style", Mode != CameraMode.MenuLimb);
+        _globe.Visible = _atmo.Visible = true;
+        _clouds.Visible = Mode == CameraMode.MenuLimb; // clouds only on the menu backdrop: they would hide the terrain
         Ready3D = true;
         Log.Info($"Globe ready ({b.Size}px faces, {Planet.TileCount} tiles)");
         _onReady?.Invoke();
@@ -347,6 +349,14 @@ public partial class PlanetView : SubViewportContainer
         if (t < 0) return -1;
         Vector3 p = o + d * t;
         return Planet.Grid.Nearest(new V3(p.X, p.Y, p.Z), HoverTile >= 0 ? HoverTile : 0);
+    }
+
+    /// <summary>Hovers a tile programmatically (autopilot): same effect as moving the cursor over it.</summary>
+    public void Hover(int tile)
+    {
+        HoverTile = tile;
+        RebuildHover();
+        TileHovered?.Invoke(tile);
     }
 
     public void Select(int tile)

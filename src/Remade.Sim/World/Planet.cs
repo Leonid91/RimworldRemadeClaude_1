@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
 using Remade.Core;
@@ -9,8 +10,11 @@ namespace Remade.World;
 
 public enum Biome : byte
 {
-    Ocean, IceSheet, Tundra, BorealForest, TemperateForest, Grassland, AridShrubland, Desert, TropicalRainforest, Savanna,
+    Ocean, IceSheet, Tundra, BorealForest, TemperateForest, Grassland, AridShrubland, Desert, TropicalRainforest, Savanna, Lake,
 }
+
+/// <summary>What kind of water a tile is: open sea (large connected body) or an inland lake.</summary>
+public enum WaterBody : byte { None, Ocean, Lake }
 
 public enum Hilliness : byte { Flat, SmallHills, LargeHills, Mountainous, Impassable }
 
@@ -46,6 +50,7 @@ public static class BiomeInfo
         Biome.Desert => "Desert",
         Biome.TropicalRainforest => "Tropical rainforest",
         Biome.Savanna => "Savanna",
+        Biome.Lake => "Lake",
         _ => throw new ArgumentOutOfRangeException(nameof(b), b, null),
     };
 
@@ -61,6 +66,7 @@ public static class BiomeInfo
         Biome.Desert => "Sand, stone and scorching days.",
         Biome.TropicalRainforest => "Hot, humid, teeming jungle.",
         Biome.Savanna => "Warm grassland with scattered trees.",
+        Biome.Lake => "Fresh inland water.",
         _ => "",
     };
 
@@ -102,7 +108,10 @@ public sealed class Planet
     public readonly int[] Downstream;       // next tile toward the sea along the drainage, -1 for sea tiles
     public readonly float[] Flow;           // accumulated drainage (relative units)
     public readonly byte[] RiverSize;       // 0 none, 1 creek, 2 river, 3 large river
-    public readonly bool[] Coast;
+    public readonly bool[] Coast;           // land next to the ocean
+    public readonly bool[] LakeShore;       // land next to a lake
+    public readonly bool[] Estuary;         // a river mouth widening into the sea (land tile, playable)
+    public readonly WaterBody[] Water;
     public readonly float[] Ruggedness;     // 0..1 mountain-ridge strength (used for local relief)
 
     internal readonly Noise ElevNoise, DetailNoise, RidgeNoise, ClimateNoise;
@@ -128,10 +137,14 @@ public sealed class Planet
         Elevation = new float[n]; MeanTemp = new float[n]; SeasonAmp = new float[n]; AnnualPrecip = new float[n];
         Biomes = new Biome[n]; Hills = new Hilliness[n]; Downstream = new int[n]; Flow = new float[n];
         RiverSize = new byte[n]; Coast = new bool[n]; Ruggedness = new float[n];
+        LakeShore = new bool[n]; Estuary = new bool[n]; Water = new WaterBody[n];
 
         GenerateElevation();
+        ClassifyWater();
         GenerateClimateNormals();
         GenerateRivers();
+        MakeEstuaries();
+        UpdateShores();
         ClassifyBiomes();
         Climate = new Climate(this);
         Log.Info($"Planet ready: {n} tiles, land {LandFraction():P0}, rivers {CountRivers()} tiles, temperate {Count(Biome.TemperateForest)} tiles");
@@ -180,12 +193,108 @@ public sealed class Planet
             Elevation[i] = e >= 0 ? e * 5200f : e * 6500f;
             if (Elevation[i] >= 0 && Elevation[i] < 2f) Elevation[i] = 2f; // land tiles are strictly above sea level
         }
+
+    }
+
+    // ---------------------------------------------------------------- water bodies
+
+    /// <summary>Connected bodies of water: the large ones are ocean, small enclosed ones are lakes.</summary>
+    void ClassifyWater()
+    {
+        int n = Grid.TileCount;
+        var comp = new int[n];
+        Array.Fill(comp, -1);
+        var sizes = new List<int>();
+        var q = new Queue<int>();
+        for (int start = 0; start < n; start++)
+        {
+            if (Elevation[start] >= 0 || comp[start] >= 0) continue;
+            int id = sizes.Count, size = 0;
+            comp[start] = id; q.Enqueue(start);
+            while (q.Count > 0)
+            {
+                int t = q.Dequeue(); size++;
+                foreach (int nb in Grid.Neighbors(t))
+                    if (Elevation[nb] < 0 && comp[nb] < 0) { comp[nb] = id; q.Enqueue(nb); }
+            }
+            sizes.Add(size);
+        }
+        // bodies covering less than 0.5 % of the planet are lakes
+        int lakeMax = Math.Max(3, n / 200);
+        int lakes = 0;
         for (int i = 0; i < n; i++)
         {
-            if (Elevation[i] < 0) continue;
-            foreach (int nb in Grid.Neighbors(i))
-                if (Elevation[nb] < 0) { Coast[i] = true; break; }
+            if (Elevation[i] >= 0) { Water[i] = WaterBody.None; continue; }
+            Water[i] = sizes[comp[i]] <= lakeMax ? WaterBody.Lake : WaterBody.Ocean;
+            if (Water[i] == WaterBody.Lake) lakes++;
         }
+        Log.Info($"Water bodies: {sizes.Count} ({sizes.Count(sz => sz <= lakeMax)} lakes covering {lakes} tiles)");
+    }
+
+    /// <summary>
+    /// Narrow sea inlets that a river flows into become estuaries: land tiles carrying a large river into the sea
+    /// (playable), instead of open ocean.
+    /// </summary>
+    void MakeEstuaries()
+    {
+        int made = 0;
+        for (int pass = 0; pass < 4; pass++)
+        {
+            var convert = new List<int>();
+            for (int t = 0; t < Grid.TileCount; t++)
+            {
+                if (Water[t] != WaterBody.Ocean) continue;
+                int land = 0; bool fed = false;
+                foreach (int nb in Grid.Neighbors(t))
+                {
+                    if (Water[nb] == WaterBody.None) land++;
+                    if (Water[nb] == WaterBody.None && Downstream[nb] == t && RiverSize[nb] > 0) fed = true;
+                }
+                if (fed && land >= 4) convert.Add(t);
+            }
+            if (convert.Count == 0) break;
+            foreach (int t in convert)
+            {
+                byte size = 2; float flow = 0; int sea = -1; float seaElev = float.MaxValue;
+                foreach (int nb in Grid.Neighbors(t))
+                {
+                    if (Water[nb] == WaterBody.None && Downstream[nb] == t) { size = Math.Max(size, RiverSize[nb]); flow += Flow[nb]; }
+                    if (Water[nb] == WaterBody.Ocean && !convert.Contains(nb) && Elevation[nb] < seaElev) { seaElev = Elevation[nb]; sea = nb; }
+                }
+                if (sea < 0) continue; // fully enclosed by other inlets: wait for the next pass
+                Water[t] = WaterBody.None;
+                Elevation[t] = 3f;
+                Estuary[t] = true;
+                RiverSize[t] = size;
+                Flow[t] = flow;
+                Downstream[t] = sea;
+                made++;
+            }
+        }
+        if (made > 0) Log.Info($"Estuaries: {made} narrow river mouths turned into river tiles");
+    }
+
+    void UpdateShores()
+    {
+        for (int i = 0; i < Grid.TileCount; i++)
+        {
+            Coast[i] = LakeShore[i] = false;
+            if (Water[i] != WaterBody.None) continue;
+            foreach (int nb in Grid.Neighbors(i))
+            {
+                if (Water[nb] == WaterBody.Ocean) Coast[i] = true;
+                if (Water[nb] == WaterBody.Lake) LakeShore[i] = true;
+            }
+        }
+    }
+
+    /// <summary>Typical wind speed of a tile (m/s): the prevailing wind for its latitude, weaker on high ground, plus
+    /// the average contribution of passing weather systems.</summary>
+    public float TypicalWind(int tile)
+    {
+        float lat = Grid.Latitude(tile);
+        var w = World.Climate.PrevailingWind(lat);
+        return w.Length() * (0.6f + 0.4f * MathF.Max(0f, 1f - MathF.Max(0f, Elevation[tile]) / 4000f)) + 1.5f;
     }
 
     // ---------------------------------------------------------------- climate normals
@@ -242,7 +351,7 @@ public sealed class Planet
         var q = new Queue<int>();
         for (int i = 0; i < n; i++)
         {
-            if (Elevation[i] < 0) { dist[i] = 0; q.Enqueue(i); }
+            if (Water[i] == WaterBody.Ocean) { dist[i] = 0; q.Enqueue(i); }
             else dist[i] = int.MaxValue;
         }
         while (q.Count > 0)
@@ -351,8 +460,8 @@ public sealed class Planet
         int n = Grid.TileCount;
         for (int i = 0; i < n; i++)
         {
-            Biomes[i] = Classify(Elevation[i], MeanTemp[i], AnnualPrecip[i]);
-            if (Elevation[i] < 0) { Hills[i] = Hilliness.Flat; continue; }
+            Biomes[i] = Water[i] == WaterBody.Lake ? Biome.Lake : Classify(Elevation[i], MeanTemp[i], AnnualPrecip[i]);
+            if (Water[i] != WaterBody.None) { Hills[i] = Hilliness.Flat; continue; }
             float maxDiff = 0;
             foreach (int nb in Grid.Neighbors(i))
                 if (Elevation[nb] >= 0) maxDiff = MathF.Max(maxDiff, MathF.Abs(Elevation[nb] - Elevation[i]));
@@ -404,7 +513,7 @@ public sealed class Planet
         for (int i = 0; i < TileCount; i++)
         {
             if (!BiomeInfo.Playable(Biomes[i]) || Hills[i] == Hilliness.Impassable) continue;
-            float s = (preferRiver && RiverSize[i] > 0 ? 3f : 0f) + (Coast[i] ? 1f : 0f) + (Hills[i] == Hilliness.SmallHills ? 1f : 0f)
+            float s = (preferRiver && RiverSize[i] > 0 ? 3f : 0f) + (Coast[i] || LakeShore[i] ? 1f : 0f) + (Hills[i] == Hilliness.SmallHills ? 1f : 0f)
                       - MathF.Abs(MeanTemp[i] - 11f) * 0.15f + Hash.Cell01(i, 7, Params.Seed) * 0.5f;
             if (s > bestScore) { bestScore = s; best = i; }
         }

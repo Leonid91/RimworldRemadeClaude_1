@@ -49,21 +49,34 @@ vec3 season_foliage(vec3 summer_col, float variation) {
 	return mix(winter, spring, smoothstep(3.6, 4.0, s));
 }
 
-// grass colour across the year
-vec3 season_grass(vec3 base) {
+// how far autumn colours have progressed (0 = green .. 1 = full autumn), and how bare the crowns are in winter
+float autumn_amount() {
 	float s = mod(season, 4.0);
-	vec3 dry = base * vec3(1.25, 1.05, 0.55);
-	vec3 dead = vec3(0.36, 0.31, 0.20);
-	if (s < 1.0) return mix(base * vec3(0.95, 1.12, 0.85), base, s);
-	if (s < 2.0) return mix(base, dry, smoothstep(1.3, 2.0, s) * 0.7);
-	if (s < 3.0) return mix(dry, dead, smoothstep(2.2, 3.0, s));
-	return mix(dead, base * vec3(0.95, 1.12, 0.85), smoothstep(3.5, 4.0, s));
+	return smoothstep(2.05, 2.6, s) * (1.0 - smoothstep(3.7, 3.95, s));
+}
+float winter_amount() {
+	float s = mod(season, 4.0);
+	return smoothstep(2.85, 3.15, s) * (1.0 - smoothstep(3.7, 3.95, s));
 }
 
-vec2 wind_sway(vec3 world_pos, float height, float stiffness) {
-	float t = TIME;
-	float gust = 0.6 + 0.4 * sin(dot(world_pos.xz, wind_dir) * 0.08 - t * 1.3) * sin(t * 0.37 + world_pos.x * 0.01);
-	float flutter = sin(t * 2.7 + world_pos.x * 0.7 + world_pos.z * 0.9) * 0.25;
-	float amount = wind_strength * gust * height * height / stiffness;
-	return wind_dir * amount + vec2(-wind_dir.y, wind_dir.x) * flutter * amount * 0.4;
+// Tree / bush sway (first prototype). Displacement grows with height above the instance origin, so trunks and leaves
+// stay attached. ntex = the shared RGBA noise texture (alpha: low-frequency gusts).
+vec3 tree_sway(sampler2D ntex, vec3 world_v, vec3 origin, float phase, float amount) {
+	float hgt = max(world_v.y - origin.y, 0.0);
+	float gust = texture(ntex, origin.xz * 0.02 - wind_dir * TIME * 0.045).a;
+	float k = hgt * hgt * 0.012 * amount;
+	vec2 sway = wind_dir * (gust * 1.3 + 0.25) * wind_strength * k * 2.2;
+	sway += vec2(sin(TIME * 1.25 + phase), cos(TIME * 1.05 + phase * 1.3)) * k * 0.7 * wind_strength;
+	return vec3(sway.x, -length(sway) * 0.15, sway.y);
+}
+
+// 1 when this fragment sits between the camera and the focused colonist (canopy x-ray); reveal_pos.w = radius.
+float reveal_cut(vec3 wp, vec3 cam) {
+	if (reveal_pos.w <= 0.0) return 0.0;
+	vec3 a = cam, b = reveal_pos.xyz + vec3(0.0, 0.8, 0.0);
+	vec3 ab = b - a;
+	float t = clamp(dot(wp - a, ab) / dot(ab, ab), 0.0, 1.0);
+	float d = length(a + ab * t - wp);
+	// only foliage above head height: bushes beside the colonist stay whole
+	return (1.0 - smoothstep(reveal_pos.w * 0.6, reveal_pos.w, d)) * step(0.3, t) * step(t, 0.995) * step(reveal_pos.y + 1.5, wp.y);
 }
