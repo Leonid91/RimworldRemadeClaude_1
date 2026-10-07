@@ -101,6 +101,7 @@ public partial class Main : Node
         Log.Info($"Godot {Engine.GetVersionInfo()["string"]} | {RenderingServer.GetVideoAdapterName()} ({RenderingServer.GetVideoAdapterVendor()}) | " +
                  $"{OS.GetName()} | args: {Args.Describe()} | user dir {OS.GetUserDataDir()}");
         Settings.Load();
+        if (Args.Has("shadow-quality")) Settings.ShadowQuality = int.Parse(Args.Get("shadow-quality")); // profiling override
         Settings.ApplyInput();
         Settings.ApplyDisplay(GetViewport());
         GetTree().Root.Theme = UiKit.Theme;

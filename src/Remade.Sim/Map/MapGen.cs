@@ -150,10 +150,16 @@ public static class MapGen
 
         float hillAmp = feat.Hills switch
         {
-            Hilliness.Flat => 1.6f, Hilliness.SmallHills => 4f, Hilliness.LargeHills => 8f, Hilliness.Mountainous => 12f, _ => 16f,
+            Hilliness.Flat => 2.2f, Hilliness.Hills => 9f, Hilliness.Mountainous => 13f, _ => 16f,
         };
-        // the rolling relief before water shapes it (also used to find natural basins for ponds)
-        float Rolling(float x, float y) => (noise.Fbm(x * 0.008f, y * 0.008f, 5) * 0.5f + 0.5f) * hillAmp;
+        // the rolling relief before water shapes it (also used to find natural basins for ponds). On hills, about half
+        // of the map rises into hills and the rest stays as gentle lowland between them.
+        bool hilly = feat.Hills == Hilliness.Hills;
+        float Rolling(float x, float y)
+        {
+            float v = noise.Fbm(x * 0.008f, y * 0.008f, 5) * 0.5f + 0.5f;
+            return hilly ? (0.15f * v + 0.85f * SmoothStep(0.42f, 0.7f, v)) * hillAmp : v * hillAmp;
+        }
 
         // ponds and small lakes: fresh still water, more of them on wet tiles; one is guaranteed near the landing
         // site when no river or sea is close, so colonists always have something to drink. Ponds lie in the low
@@ -201,7 +207,7 @@ public static class MapGen
         // share of the map covered by granite massifs
         float rockCoverage = feat.Hills switch
         {
-            Hilliness.Flat => 0.015f, Hilliness.SmallHills => 0.07f, Hilliness.LargeHills => 0.16f, Hilliness.Mountainous => 0.32f, _ => 0.5f,
+            Hilliness.Flat => 0.03f, Hilliness.Hills => 0.18f, Hilliness.Mountainous => 0.75f, _ => 0.88f,
         };
         float landingClear = Math.Clamp(size * 0.06f, 14f, 28f);
 

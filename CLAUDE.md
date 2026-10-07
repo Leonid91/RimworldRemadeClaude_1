@@ -60,6 +60,12 @@ game/shaders             world_common.gdshaderinc (globals), terrain, rock, wate
   wind drift, collisions sampled every 6 cm against ground/water/walls/rock/trunks/crowns and body volumes (colonist
   cylinder, deer capsule + neck + head + legs); impact point → body part; stuck arrows are Items with StuckZ/StuckDir
   or StuckArrow entries on creatures. Previews (aim arc) never draw from the sim RNG. Godot ↔ sim: (x, y, z) ↔ (x, z, y).
+- Flora: 32-cell regions (Godot culls/LODs per MultiMesh, not per instance); oaks: Detail < 48 m, Low beyond,
+  shadows only from an opaque blob proxy; bushes likewise. Grass field: 4×4 tiles (frustum culling), instances ordered
+  slot-major so VisibleInstanceCount thins it when zoomed out. Profile with `--perf` (gpu ms) and
+  `--gfx-off=…,dof`, `--shadow-quality=N`.
+- Relief (Hilliness): Flat (~70 % of land, plains + plateaus), Hills, Mountainous (~75 % rock), Impassable — from
+  ruggedness and slope quantiles, never from altitude.
 - Globe overlays: a tile-id cubemap (map style only) + a per-tile RGF texture (value, water); relief icons are a
   MultiMesh of quads (`ReliefIcons` atlas).
 - First person (GameView.FirstPerson): camera at the controlled colonist's eyes, mouse captured, model hidden.
@@ -75,19 +81,22 @@ game/shaders             world_common.gdshaderinc (globals), terrain, rock, wate
 ## Running and testing
 - `Play.bat` (player), or `"$GODOT" --path game -- [args]`. First run after shader changes compiles pipelines (slow).
 - Args: `--play` (skip menus) `--map=N --seed=N --tile=N --hour=H --weather=clear|cloudy|rain|storm|fog|snow`
-  `--windowed --novsync --perf --gfx-off=shadows,ssao,fog,glow,grass,trees,water,taa,hud --verbose --globe-debug`.
+  `--windowed --novsync --perf --gfx-off=shadows,ssao,fog,glow,grass,trees,water,taa,hud,dof --shadow-quality=N --verbose --globe-debug`.
 - AutoPilot `--auto="cmd=arg; ..."`: wait, waitfor=game|globe|planet|menu, click=Text (click==Exact), key=action,
   hold=action,s, shot=name, select_tile=start|N, overlay=…, mapsize=N, pawn=i, control=i, speed=N, tab=…, layer=…,
   walkto=item:bow|door|deer|outside|x,y, interact[=label], deer_near=dist, aimshoot=n, hour=H, world, cam=dist[,yaw],
   camfind=water|rock|tree|bush|cabin, expect=bow|bowaway|shirtoff|shirton|arrows|meat|deerdead|dooropen, hover=start|lake|ocean|N,
-  hovertext=…, inv=putaway|equip:id|takeoff:id|wear:id, aim=on|off, fpv=on|off, look=deer|yaw,pitch, log=…, quit.
+  hovertext=…, inv=putaway|equip:id|takeoff:id|wear:id|bodytogrid:id,x,y|gridtobody:id, aim=on|off, fpv=on|off,
+  look=deer|rock|yaw,pitch, log=…, quit.
   Any ERROR logged during a run fails it. Screenshots go to `screenshots/`.
 - `tools/integration.sh [quick]`: build → unit tests (gate) → part 1 → game scenarios (ui_flow, goal, saveload,
-  perf_1000, perf_1500, visuals, rain, snow, fog); report in `test-results/`, screenshots per scenario.
+  perf_1000, perf_1500, perf_forest_rain, visuals, rain, snow, fog); report in `test-results/`, screenshots per scenario.
 
 ## Performance notes (RTX 3060 laptop, 1080p)
 - Test view (250 map, forest + river, noon): ~8 ms/frame, ~1.2 M triangles, ~480 draws.
-- Costs measured with `--gfx-off`: shadows ≈ 2 ms, trees ≈ 3 ms. Trees cast shadows with their low-LOD mesh only.
-- Sim: 9 µs/tick with 245 deer on 1000×1000 (Ultra needs 900 ticks/s). Cross-map A* ≈ 5 ms avg on 1000×1000.
+- 1500 map, dense forest, rain, fullscreen: ~7.5 ms GPU at 18 m, ~9–10 ms at 30–60 m (was 18 ms = 24–50 fps).
+- Costs measured with `--gfx-off`: shadows ≈ 2 ms, trees ≈ 3 ms. Trees and bushes cast shadows from opaque blob proxies only.
+- Sim: 9 µs/tick with 245 deer on 1000×1000 (Ultra needs 900 ticks/s). Cross-map paths ≈ 4.7 ms avg on 1000×1000 (A* confined to a corridor
+  planned on 16×16 sector regions, `PathGrid.Regions`, rebuilt per dirty sector).
   C++ has not been needed: profiling shows no CPU hot spot near the budgets (revisit pathfinding with HPA* first).
 - Chunks/regions stream in by view and are freed when long unseen; grass is a camera-centred GPU field.

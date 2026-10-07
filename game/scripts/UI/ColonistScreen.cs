@@ -138,13 +138,13 @@ public partial class ColonistScreen : ScreenBase
         c3.AddChild(UiKit.Spacer(0, 8));
         c3.AddChild(UiKit.Heading("Worn"));
         foreach (var a in p.Apparel)
-            c3.AddChild(UiKit.Label($"{a.Def.Label}  ·  {string.Join("/", a.Def.Layers.Select(l => l.ToString().ToLowerInvariant()))}", 15, UiKit.Muted));
+            c3.AddChild(UiKit.Label(a.Def.Label, 15, UiKit.Muted));
         c3.AddChild(UiKit.Spacer(0, 8));
         c3.AddChild(UiKit.Heading("Carrying capacity"));
         var cap = UiKit.Label($"Comfortable up to {p.CarryBasisKg * Pawn.LightLoad:F0} kg, max {p.CarryBasisKg * Pawn.MaxLoad:F0} kg  ·  inventory {p.Inventory.W}×{p.Inventory.H} ({p.Inventory.W * p.Inventory.H} slots)", 15, UiKit.Muted);
         cap.TooltipText = $"Measured against {(p.CarryBasisKg != p.BodyMassKg ? $"{p.CarryBasisKg:F0} kg (body mass {p.BodyMassKg:F0} kg × traits)" : $"the body mass ({p.BodyMassKg:F0} kg)")}:\n" +
                           $"{Pawn.LightLoad * 100:F0} % comfortable, {Pawn.MarchLoad * 100:F0} % march load (slower), {Pawn.HeavyLoad * 100:F0} % heavy, {Pawn.MaxLoad * 100:F0} % maximum.\n" +
-                          "Inventory slots: about one per kilogram of the march load.";
+                          "Inventory: about one slot per kilogram of the march load, so heavier or stronger colonists carry a bigger grid.";
         cap.MouseFilter = MouseFilterEnum.Stop;
         c3.AddChild(cap);
         cols.AddChild(c3);

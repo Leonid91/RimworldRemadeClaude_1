@@ -19,7 +19,9 @@ choose a landing site on the globe (hover to see the hexagonal regions, click to
 settled in this version) → Next → choose a map size (300 up to 1500 cells, RimWorld's largest is 325) → Play.
 
 The globe shows each hexagonal region in one flat biome colour (a map is always a single biome), with a legend, and a
-small painted icon on every hilly region: low hills, large hills, mountains, impassable mountains. The temperature,
+small painted icon on hills, mountains and impassable mountains only. Most land is flat — plains and plateaus (high but
+level ground), which have no icon and only gentle undulations with a little rock on their maps; hills roll over about
+half of their map; mountains are about three quarters rock. The temperature,
 elevation and precipitation maps are coloured hexagon by hexagon too, with seas and lakes in grey so the land stands
 out. The cursor label shows the region and the value of the active map: temperature (°C), elevation (m) or
 precipitation (mm/day). Lakes are inland water (fresh, light blue) and give their shore maps a lake beach; an **estuary** is a large
@@ -55,10 +57,11 @@ automatically on French/Belgian keyboard layouts).
 - **Bio** — full name, sex, biological age and chronological age in brackets when they differ (cryptosleep), traits
   (hover a trait: its effects appear at once, helpful ones in green and harmful ones in red), 12 skills from 0 to 20.
 - **Equipment** — a body figure with layer tabs (Skin, Middle, Outer, Headgear, Eyes, Belt) showing what is worn where
-  and what is free (everyone starts in a white cotton T-shirt and jeans); what is **worn** (drag a garment into the
-  inventory to take it off, drag clothes onto "wear" to put them on, or right-click: Take off / Take off and drop /
-  Wear); the **hands** and one **inventory** grid whose size follows how much the colonist can carry (about one slot per
-  kilogram of their march load, 8 columns, e.g. 8×4 = 32 slots).
+  and what is free (everyone starts in a white cotton T-shirt and jeans). Click a garment on the body to pick it up and
+  drop it in the inventory to take it off; pick clothes up in the inventory and drop them on the body to put them on
+  (the regions they cover light up green, red if something already covers them); right-click the body for Take off /
+  Take off and drop. Then the **hands** and one **inventory** grid whose size follows how much the colonist can carry
+  (about one slot per kilogram of their march load: 7×3 for a light colonist, 8×4 for an average one, 8×6 for a big one).
   Drag an item from the grid onto the hands to hold it, drag what you hold back into the grid (or right click:
   Equip / Take in hands / Put away / Eat / Drop); right click while dragging rotates. A bow must be in the hands to
   shoot. The load bar shows the carried mass against the colonist's carrying capacity (body mass, +20 % with the

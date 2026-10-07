@@ -4,9 +4,8 @@ using Godot;
 namespace Remade.Game.Planet3D;
 
 /// <summary>
-/// Painted relief icons for the globe, drawn once in code into a 4×1 atlas (128 px each): small hills (two low
-/// humps), large hills (three tall humps), mountains (a peak with a snowy tip) and impassable mountains (a jagged
-/// double peak with large snowfields). Each drawing has a dark outline so it reads on any biome colour, and stays
+/// Painted relief icons for the globe, drawn once in code into a 3×1 atlas (128 px each): hills (three rounded
+/// humps), mountains (a peak with a snowy tip) and impassable mountains (a jagged double peak with large snowfields). Each drawing has a dark outline so it reads on any biome colour, and stays
 /// inside a circle of 0.45 of its cell so it never leaves its hexagon.
 /// </summary>
 public static class ReliefIcons
@@ -17,9 +16,9 @@ public static class ReliefIcons
 
     static ImageTexture Build()
     {
-        var img = Image.CreateEmpty(S * 4, S, false, Image.Format.Rgba8);
+        var img = Image.CreateEmpty(S * 3, S, false, Image.Format.Rgba8);
         img.Fill(new Color(0, 0, 0, 0));
-        for (int k = 0; k < 4; k++) Paint(img, k);
+        for (int k = 0; k < 3; k++) Paint(img, k);
         img.GenerateMipmaps();
         return ImageTexture.CreateFromImage(img);
     }
@@ -58,15 +57,7 @@ public static class ReliefIcons
                 float dist = 1f; Color fill = default; float shade = 0;
                 switch (kind)
                 {
-                    case 0: // small hills
-                    {
-                        float a = Hump(p, 0.38f, 0.2f, 0.17f, 0.3f), b = Hump(p, 0.64f, 0.17f, 0.13f, 0.3f);
-                        dist = MathF.Min(a, b);
-                        fill = new Color(0.55f, 0.47f, 0.30f);
-                        shade = p.X < (a < b ? 0.38f : 0.64f) ? 0.12f : -0.1f;
-                        break;
-                    }
-                    case 1: // large hills
+                    case 0: // hills
                     {
                         float a = Hump(p, 0.32f, 0.2f, 0.26f, 0.24f), b = Hump(p, 0.56f, 0.22f, 0.34f, 0.24f), h3 = Hump(p, 0.75f, 0.14f, 0.2f, 0.24f);
                         dist = MathF.Min(a, MathF.Min(b, h3));
@@ -75,7 +66,7 @@ public static class ReliefIcons
                         shade = p.X < cx ? 0.12f : -0.12f;
                         break;
                     }
-                    case 2: // mountain
+                    case 1: // mountain
                     {
                         dist = Peak(p, 0.5f, 0.32f, 0.5f, 0.22f, 0.02f);
                         fill = new Color(0.47f, 0.45f, 0.43f);

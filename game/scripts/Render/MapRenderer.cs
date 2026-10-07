@@ -363,8 +363,21 @@ void fragment() {
         var p = new GV3(cx, ground + hgt, cy);
         // jagged rims: push boundary corners sideways with noise
         float jx = _noise.Get(cx * 0.61f, cy * 0.61f, 1.3f), jz = _noise.Get(cx * 0.61f, cy * 0.61f, 7.9f);
-        p += new GV3(jx, _noise.Get(cx * 0.9f, cy * 0.9f) * 0.6f, jz) * (boundary ? 0.32f : 0.12f);
+        p += new GV3(jx, _noise.Get(cx * 0.9f, cy * 0.9f) * 0.6f, jz) * (boundary ? 0.16f : 0.12f);
+        // rims lean slightly inward so the cliff never overhangs the walkable cell next to it
+        if (boundary) p -= CornerOutward(cx, cy) * 0.12f;
         return p;
+    }
+
+    /// <summary>Horizontal direction from a grid corner toward the open (non-rock) cells around it.</summary>
+    GV3 CornerOutward(int gx, int gy)
+    {
+        float ox = 0, oz = 0;
+        for (int dy = -1; dy <= 0; dy++)
+            for (int dx = -1; dx <= 0; dx++)
+                if (!IsRock(gx + dx, gy + dy)) { ox += dx + 0.5f; oz += dy + 0.5f; }
+        var o = new GV3(ox, 0, oz);
+        return o.LengthSquared() < 1e-6f ? GV3.Zero : o.Normalized();
     }
 
     ArrayMesh BuildRock(int x0, int y0, int x1, int y1)
@@ -404,14 +417,19 @@ void fragment() {
     {
         const int rows = 3;
         var o3 = new GV3(outward.X, 0, outward.Y);
+        // every row point depends only on its grid corner (never on the wall), so the walls meeting at a corner share
+        // their vertices exactly and leave no slit between them
         GV3 Row(GV3 top, int gx, int gy, int r)
         {
             float t = r / (float)rows; // 0 top .. 1 bottom
+            var oc = CornerOutward(gx, gy);
             float ground = _map.Ground[Math.Clamp(gy, 0, _map.Height) * (_map.Width + 1) + Math.Clamp(gx, 0, _map.Width)] - 0.15f;
-            var bottom = new GV3(top.X, ground, top.Z) + o3 * 0.28f;
+            // the foot spreads at most ~0.25 m into the open cell (less than a colonist's radius), so nobody — and no
+            // first-person camera — ever stands inside the rock
+            var bottom = new GV3(top.X, ground, top.Z) + oc * 0.12f;
             var p = top.Lerp(bottom, t);
-            float bulge = _noise.Get(top.X * 0.8f + r * 3.1f, top.Z * 0.8f, r * 1.7f) * 0.22f * MathF.Sin(t * MathF.PI);
-            return p + o3 * (bulge + t * t * 0.18f);
+            float bulge = _noise.Get(top.X * 0.8f + r * 3.1f, top.Z * 0.8f, r * 1.7f) * 0.1f * MathF.Sin(t * MathF.PI);
+            return p + oc * (bulge + t * t * 0.06f);
         }
         for (int r = 0; r < rows; r++)
         {

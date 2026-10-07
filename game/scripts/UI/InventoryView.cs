@@ -9,11 +9,12 @@ using Remade.Things;
 namespace Remade.Game.UI;
 
 /// <summary>
-/// Stalker / Project Zomboid style inventory: what is worn, the hands (one item: a weapon, or anything carried by
-/// hand) and one grid whose size follows the colonist's carrying capacity. Drag items between worn clothes, the grid
-/// and the hands (dragging clothes into the grid takes them off, dragging clothes onto "Worn" puts them on; right mouse
-/// while dragging rotates), right-click for actions (wear, take off, take in hands, put away, eat, drop). A load bar
-/// shows carried mass against the load zones.
+/// Stalker / Project Zomboid style inventory: the hands (one item: a weapon, or anything carried by hand) and one grid
+/// whose size follows the colonist's carrying capacity. Click an item to pick it up and click where it goes (right
+/// mouse while dragging rotates); a ghost of the item follows the cursor. Clothes are picked up from the body figure
+/// (see InspectPanel) and dropped into the grid to take them off; clothes dragged from the grid onto the figure are
+/// put on. Right-click for actions (wear, take in hands, put away, eat, drop). A load bar shows carried mass against
+/// the load zones.
 /// </summary>
 public partial class InventoryView : VBoxContainer
 {
@@ -26,7 +27,9 @@ public partial class InventoryView : VBoxContainer
     bool _dragRot;
     GridCanvas _grid;
     HandsSlot _hands;
-    WornStrip _worn;
+    DragGhost _ghost;
+    /// <summary>Raised when a drag starts or ends (the body figure highlights where clothes would go).</summary>
+    public event Action DragChanged;
 
     public InventoryView(GameSim sim, Pawn pawn, Action changed)
     {
@@ -39,9 +42,6 @@ public partial class InventoryView : VBoxContainer
     {
         foreach (var c in GetChildren()) c.QueueFree();
         AddChild(LoadBar());
-        AddChild(UiKit.Heading("Worn"));
-        _worn = new WornStrip(this) { Name = "WornStrip" };
-        AddChild(_worn);
         AddChild(UiKit.Heading("Hands"));
         _hands = new HandsSlot(this) { Name = "HandsSlot" };
         AddChild(_hands);
@@ -54,6 +54,90 @@ public partial class InventoryView : VBoxContainer
         AddChild(UiKit.Label($"{g.W}×{g.H} = {g.W * g.H} slots  ·  {g.Mass:F2} kg", 14, UiKit.Muted));
         _grid = new GridCanvas(this, g) { Name = "InventoryGrid" };
         AddChild(_grid);
+        _ghost = new DragGhost(this) { Name = "DragGhost" };
+        AddChild(_ghost);
+    }
+
+    // ------------------------------------------------------------------ drag API for the body figure
+
+    /// <summary>The item being dragged (or null), and whether it comes from the body (a worn garment).</summary>
+    public Item DragItem => _dragItem;
+    public bool DraggingWorn => _dragItem != null && _dragFromWorn;
+
+    /// <summary>Picks a worn garment up from the body figure.</summary>
+    public void BeginDragWorn(Item worn)
+    {
+        if (_dragItem != null) return;
+        Log.Action($"inventory: pick up worn {worn} from the body");
+        _dragItem = worn; _dragFromWorn = true; _dragFromHands = false; _dragRot = false;
+        NotifyDrag();
+    }
+
+    /// <summary>The dragged item was dropped on the body figure: clothes from the grid or the hands are put on.</summary>
+    public void DropOnBody()
+    {
+        var it = _dragItem;
+        if (it == null) return;
+        if (_dragFromWorn) { CancelDrag(); return; }
+        if (it.Def.Kind != ThingKind.Apparel)
+        {
+            _sim.Message($"The {it.Def.Label} cannot be worn.", _pawn.Position);
+            CancelDrag();
+            return;
+        }
+        Log.Action($"inventory: drop {it} on the body");
+        _sim.WearFromInventory(_pawn, it);
+        Changed();
+    }
+
+    /// <summary>Picks an inventory item up, as a click on it does (autopilot).</summary>
+    public void PickFromGrid(Item it)
+    {
+        int idx = _pawn.Inventory.Entries.FindIndex(e => e.Item == it);
+        Invariant.Check(idx >= 0, $"{it} is not in the inventory");
+        _dragItem = it; _dragFromHands = false; _dragFromWorn = false; _dragRot = _pawn.Inventory.Entries[idx].Rotated;
+        NotifyDrag();
+    }
+
+    /// <summary>Drops the dragged item on a grid cell, as a click there does (autopilot).</summary>
+    public void DropAtGridCell(int x, int y) => DropOnGrid(new Vector2I(x, y));
+
+    /// <summary>Right-click menu for a worn garment (from the body figure).</summary>
+    public void ShowWornMenu(Item worn, Vector2 at) => WornMenu(worn, at);
+
+    public void CancelDrag()
+    {
+        _dragItem = null; _dragFromHands = false; _dragFromWorn = false;
+        NotifyDrag();
+    }
+
+    void NotifyDrag()
+    {
+        _grid?.QueueRedraw(); _hands?.QueueRedraw(); _ghost?.QueueRedraw();
+        DragChanged?.Invoke();
+    }
+
+    /// <summary>The dragged item drawn under the cursor wherever it goes in the panel.</summary>
+    sealed partial class DragGhost : Control
+    {
+        readonly InventoryView _owner;
+        public DragGhost(InventoryView owner) { _owner = owner; TopLevel = true; ZIndex = 50; MouseFilter = MouseFilterEnum.Ignore; }
+
+        public override void _Process(double delta)
+        {
+            var it = _owner._dragItem;
+            Visible = it != null;
+            if (!Visible) return;
+            int w = _owner._dragRot ? it.Def.GridH : it.Def.GridW, h = _owner._dragRot ? it.Def.GridW : it.Def.GridH;
+            Size = new Vector2(w * Cell, h * Cell);
+            GlobalPosition = GetGlobalMousePosition() + new Vector2(10, 10);
+            QueueRedraw();
+        }
+
+        public override void _Draw()
+        {
+            if (_owner._dragItem != null) DrawItem(this, _owner._dragItem, new Rect2(Vector2.Zero, Size), 0.75f);
+        }
     }
 
     /// <summary>Puts the held item away, exactly like the "Put away" menu entry (also used by the autopilot).</summary>
@@ -91,6 +175,7 @@ public partial class InventoryView : VBoxContainer
     void Changed()
     {
         _dragItem = null; _dragFromHands = false; _dragFromWorn = false;
+        DragChanged?.Invoke();
         Rebuild();
         _changed?.Invoke();
     }
@@ -183,11 +268,11 @@ public partial class InventoryView : VBoxContainer
                     if (_owner._dragItem == null && held != null)
                     {
                         _owner._dragItem = held; _owner._dragFromHands = true; _owner._dragFromWorn = false; _owner._dragRot = false;
-                        QueueRedraw(); _owner._grid.QueueRedraw();
+                        _owner.NotifyDrag();
                     }
                     else if (_owner._dragItem != null && _owner._dragFromWorn)
                     {
-                        _owner._sim.Message("Take it off into the inventory first.", _owner._pawn.Position);
+                        _owner._sim.Message("Take it off into the inventory first: drop it in the grid.", _owner._pawn.Position);
                         _owner.Changed();
                     }
                     else if (_owner._dragItem != null && !_owner._dragFromHands)
@@ -196,7 +281,7 @@ public partial class InventoryView : VBoxContainer
                         _owner._sim.EquipFromInventory(_owner._pawn, _owner._dragItem);
                         _owner.Changed();
                     }
-                    else if (_owner._dragFromHands) { _owner._dragItem = null; _owner._dragFromHands = false; QueueRedraw(); }
+                    else if (_owner._dragFromHands) _owner.CancelDrag();
                     AcceptEvent();
                 }
                 else if (mb.ButtonIndex == MouseButton.Right)
@@ -285,7 +370,7 @@ public partial class InventoryView : VBoxContainer
                         _owner._dragItem = Grid.Entries[idx].Item;
                         _owner._dragFromHands = false; _owner._dragFromWorn = false;
                         _owner._dragRot = Grid.Entries[idx].Rotated;
-                        QueueRedraw(); _owner._hands.QueueRedraw();
+                        _owner.NotifyDrag();
                     }
                     else if (_owner._dragItem != null) _owner.DropOnGrid(cell);
                     AcceptEvent();
@@ -353,91 +438,6 @@ public partial class InventoryView : VBoxContainer
         AddChild(menu);
         menu.Position = (Vector2I)at;
         menu.Popup();
-    }
-
-    /// <summary>The clothes being worn, one 2×2 tile each: drag one into the grid to take it off, drop clothes here to wear them.</summary>
-    sealed partial class WornStrip : Control
-    {
-        readonly InventoryView _owner;
-        bool _hover;
-        const float Tile = 2 * Cell;
-
-        public WornStrip(InventoryView owner)
-        {
-            _owner = owner;
-            CustomMinimumSize = new Vector2(Math.Max(1, owner._pawn.Apparel.Count + 1) * (Tile + 6), Tile + 2);
-            MouseFilter = MouseFilterEnum.Stop;
-            SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
-        }
-
-        Rect2 TileRect(int i) => new(i * (Tile + 6), 0, Tile, Tile);
-
-        int TileAt(Vector2 p)
-        {
-            for (int i = 0; i < _owner._pawn.Apparel.Count; i++) if (TileRect(i).HasPoint(p)) return i;
-            return -1;
-        }
-
-        public override void _Draw()
-        {
-            var worn = _owner._pawn.Apparel;
-            for (int i = 0; i < worn.Count; i++)
-            {
-                var r = TileRect(i);
-                DrawRect(r, new Color(0.02f, 0.03f, 0.04f, 0.85f));
-                if (!(_owner._dragFromWorn && _owner._dragItem == worn[i])) DrawItem(this, worn[i], r.Grow(-3), 1f);
-                DrawRect(r, new Color(UiKit.Line, 0.8f), false, 1);
-            }
-            // a free tile: where clothes are dropped to be worn
-            var free = TileRect(worn.Count);
-            bool dropping = _hover && _owner._dragItem != null && !_owner._dragFromWorn && _owner._dragItem.Def.Kind == ThingKind.Apparel;
-            DrawRect(free, new Color(0.02f, 0.03f, 0.04f, 0.6f));
-            DrawString(UiKit.Font, free.Position + new Vector2(6, Tile * 0.5f + 5), "wear", HorizontalAlignment.Left, -1, 13, new Color(UiKit.Muted, 0.6f));
-            DrawRect(free, dropping ? UiKit.Good : new Color(UiKit.Line, 0.5f), false, dropping ? 2 : 1);
-        }
-
-        public override void _GuiInput(InputEvent e)
-        {
-            var worn = _owner._pawn.Apparel;
-            if (e is InputEventMouseMotion mm)
-            {
-                int i = TileAt(mm.Position);
-                TooltipText = i >= 0 ? ItemTooltip(worn[i]) + "\nDrag into the inventory or right-click to take it off." : "Drop clothes here to put them on.";
-            }
-            else if (e is InputEventMouseButton mb && mb.Pressed)
-            {
-                int i = TileAt(mb.Position);
-                if (mb.ButtonIndex == MouseButton.Left)
-                {
-                    if (_owner._dragItem == null && i >= 0)
-                    {
-                        _owner._dragItem = worn[i]; _owner._dragFromWorn = true; _owner._dragFromHands = false; _owner._dragRot = false;
-                        QueueRedraw(); _owner._grid.QueueRedraw();
-                    }
-                    else if (_owner._dragItem != null && !_owner._dragFromWorn)
-                    {
-                        var it = _owner._dragItem;
-                        if (it.Def.Kind == ThingKind.Apparel) { Log.Action($"inventory: drag {it} onto Worn"); _owner._sim.WearFromInventory(_owner._pawn, it); }
-                        else _owner._sim.Message($"The {it.Def.Label} cannot be worn.", _owner._pawn.Position);
-                        _owner.Changed();
-                    }
-                    else if (_owner._dragFromWorn) { _owner._dragItem = null; _owner._dragFromWorn = false; QueueRedraw(); }
-                    AcceptEvent();
-                }
-                else if (mb.ButtonIndex == MouseButton.Right)
-                {
-                    if (_owner._dragItem != null) { _owner._dragRot = !_owner._dragRot; _owner._grid.QueueRedraw(); }
-                    else if (i >= 0) _owner.WornMenu(worn[i], mb.GlobalPosition);
-                    AcceptEvent();
-                }
-            }
-        }
-
-        public override void _Notification(int what)
-        {
-            if (what == NotificationMouseEnter) { _hover = true; QueueRedraw(); }
-            if (what == NotificationMouseExit) { _hover = false; QueueRedraw(); }
-        }
     }
 
     void ItemMenu(Item it, bool inHands, Vector2 at)

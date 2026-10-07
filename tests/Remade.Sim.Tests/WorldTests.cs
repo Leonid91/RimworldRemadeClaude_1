@@ -157,6 +157,23 @@ public class PlanetTests
     }
 
     [Fact]
+    public void MostLandIsFlatPlainsAndPlateaus()
+    {
+        var p = Shared.Value;
+        int land = 0, flat = 0, high = 0, highFlat = 0;
+        for (int i = 0; i < p.TileCount; i++)
+        {
+            if (p.Water[i] != WaterBody.None) continue;
+            land++;
+            if (p.Hills[i] == Hilliness.Flat) flat++;
+            if (p.Elevation[i] > 1000f) { high++; if (p.Hills[i] == Hilliness.Flat) highFlat++; }
+        }
+        _out.WriteLine($"flat {flat}/{land}, plateaus {highFlat}/{high} high tiles");
+        Assert.InRange(flat / (float)land, 0.65f, 0.75f);
+        Assert.True(highFlat > 0, "no plateaus: high ground is always classed as hills");
+    }
+
+    [Fact]
     public void RiversGrowDownstream()
     {
         var p = Shared.Value;

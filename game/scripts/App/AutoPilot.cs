@@ -150,6 +150,19 @@ public partial class AutoPilot : Node
                     var it = p.Inventory.Entries.Select(e => e.Item).FirstOrDefault(i => i.Def.Id == id) ?? throw new InvalidOperationException($"no {id} in the inventory");
                     iv.Equip(it);
                 }
+                else if (arg.StartsWith("bodytogrid:"))
+                {
+                    // the body figure path: pick a garment up from the body, drop it on a grid cell
+                    var parts = arg[11..].Split(',');
+                    iv.BeginDragWorn(p.Apparel.FirstOrDefault(a => a.Def.Id == parts[0]) ?? throw new InvalidOperationException($"not wearing {parts[0]}"));
+                    iv.DropAtGridCell(int.Parse(parts[1]), int.Parse(parts[2]));
+                }
+                else if (arg.StartsWith("gridtobody:"))
+                {
+                    string id = arg[11..];
+                    iv.PickFromGrid(p.Inventory.Entries.Select(e => e.Item).FirstOrDefault(i => i.Def.Id == id) ?? throw new InvalidOperationException($"no {id} in the inventory"));
+                    iv.DropOnBody();
+                }
                 else if (arg.StartsWith("takeoff:"))
                 {
                     string id = arg[8..];
@@ -188,7 +201,17 @@ public partial class AutoPilot : Node
             case "look":
             {
                 // look=deer (turn toward the nearest live deer) or look=yawDeg,pitchDeg
-                if (arg == "deer")
+                if (arg == "rock")
+                {
+                    var p = Controlled;
+                    var sim = Game.Sim;
+                    int best = -1; float bd = float.MaxValue;
+                    for (int c = 0; c < sim.Map.CellCount; c++)
+                        if (sim.Map.Buildings[c] == Building.Granite) { float d = SV2.Distance(sim.Map.CellCenter(c), p.Position); if (d < bd) { bd = d; best = c; } }
+                    var to = sim.Map.CellCenter(best) - p.Position;
+                    Game.Look(MathF.Atan2(to.Y, to.X), 0.15f);
+                }
+                else if (arg == "deer")
                 {
                     var p = Controlled;
                     var deer = Game.Sim.Animals.Where(a => !a.Dead).OrderBy(a => SV2.Distance(a.Position, p.Position)).First();

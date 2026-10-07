@@ -117,6 +117,7 @@ public partial class GameView : Node3D
                 case "water": _map.WaterVisible = false; break;
                 case "taa": Main.I.GetViewport().UseTaa = false; break;
                 case "hud": Hud.Visible = false; break;
+                case "dof": _cam.DofEnabled = false; break;
                 default: throw new ArgumentException($"--gfx-off: unknown feature '{f}'");
             }
             Log.Info($"Feature disabled for profiling: {f}");
@@ -186,7 +187,7 @@ public partial class GameView : Node3D
         if (FirstPerson)
         {
             var vp = _entities.PawnVisualPos(controlled);
-            var eye = vp + new Vector3(Mathf.Cos(_fpYaw), 0, Mathf.Sin(_fpYaw)) * 0.12f + Vector3.Up * GameSim.BodyHeight(controlled) * 0.9f;
+            var eye = vp + new Vector3(Mathf.Cos(_fpYaw), 0, Mathf.Sin(_fpYaw)) * 0.04f + Vector3.Up * GameSim.BodyHeight(controlled) * 0.9f;
             _cam.PlaceFirstPerson(eye, _fpYaw, _fpPitch);
             rect = new Rect2(vp.X - 120, vp.Z - 120, 240, 240);
         }
@@ -232,10 +233,13 @@ public partial class GameView : Node3D
         _perfTimer += delta;
         if (_perfTimer < 1) return;
         _perfTimer = 0;
+        var vpRid = GetViewport().GetViewportRid();
+        RenderingServer.ViewportSetMeasureRenderTime(vpRid, true);
+        double gpu = RenderingServer.ViewportGetMeasuredRenderTimeGpu(vpRid);
         var rs = RenderingServer.GetRenderingInfo(RenderingServer.RenderingInfo.TotalDrawCallsInFrame);
         var prims = RenderingServer.GetRenderingInfo(RenderingServer.RenderingInfo.TotalPrimitivesInFrame);
         var vmem = RenderingServer.GetRenderingInfo(RenderingServer.RenderingInfo.VideoMemUsed);
-        Log.Info($"[perf] fps {Engine.GetFramesPerSecond():F0} | frame {delta * 1000:F1} ms | sim {Sim.LastStepMs:F2} ms ({Sim.LastTicksThisFrame} ticks) | draws {rs} | prims {prims / 1000}k | " +
+        Log.Info($"[perf] fps {Engine.GetFramesPerSecond():F0} | frame {delta * 1000:F1} ms | gpu {gpu:F1} ms | sim {Sim.LastStepMs:F2} ms ({Sim.LastTicksThisFrame} ticks) | draws {rs} | prims {prims / 1000}k | " +
                  $"vram {vmem / 1048576} MB | mem {GC.GetTotalMemory(false) / 1048576} MB managed, {OS.GetStaticMemoryUsage() / 1048576} MB static | chunks {_map.BuiltChunks} | flora {_flora.Instances}");
     }
 

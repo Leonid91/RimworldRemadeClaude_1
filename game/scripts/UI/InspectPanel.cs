@@ -267,23 +267,56 @@ public partial class InspectPanel : Control
             layers.AddChild(b);
         }
         left.AddChild(layers);
+        // the whole tab is rebuilt after every inventory change so the hands, the figure and the load stay in sync
+        var inv = new InventoryView(_sim, p, () => CallDeferred(MethodName.BuildTab));
+        // the garment under a body region: the selected layer first, else the outermost one there
+        Item WornAt(BodyRegion r)
+        {
+            var a = p.WornAt(_layer, r);
+            if (a != null) return a;
+            foreach (var l in new[] { ApparelLayer.Outer, ApparelLayer.Middle, ApparelLayer.Skin, ApparelLayer.Headgear, ApparelLayer.Eyes, ApparelLayer.Belt })
+                if ((a = p.WornAt(l, r)) != null) return a;
+            return null;
+        }
         var fig = new BodyFigure
         {
+            Name = "EquipmentFigure",
             RegionColor = r =>
             {
                 var a = p.WornAt(_layer, r);
+                if (inv.DraggingWorn && a == inv.DragItem) return new Color(0.16f, 0.19f, 0.21f); // lifted off the body
                 if (a != null) return Remade.Game.UI.UiKit.Rgb(a.Def.Color);
                 return new Color(0.16f, 0.19f, 0.21f);
             },
             RegionTooltip = r =>
             {
-                var a = p.WornAt(_layer, r);
-                return $"{BodyFigure.RegionName(r)} — {_layer} layer: " + (a != null ? a.Def.Label : "free (can be equipped)");
+                var a = WornAt(r);
+                return $"{BodyFigure.RegionName(r)} — {_layer} layer: " + (p.WornAt(_layer, r) is { } w ? w.Def.Label : "free") +
+                       (a != null ? "\nClick to pick it up and drop it in the inventory to take it off · right-click for options" : "\nDrop clothes here to put them on");
+            },
+            // while clothes from the inventory are dragged: where they would go, green if free, red if something is in the way
+            RegionOutline = r =>
+            {
+                var d = inv.DragItem;
+                if (d == null || inv.DraggingWorn || d.Def.Kind != ThingKind.Apparel || Array.IndexOf(d.Def.Covers, r) < 0) return null;
+                return p.WearConflicts(d.Def).Count == 0 ? UiKit.Good : UiKit.Bad;
             },
         };
+        fig.FigureClicked += r =>
+        {
+            if (inv.DragItem != null) { inv.DropOnBody(); return; }
+            if (r.HasValue && WornAt(r.Value) is { } worn) { inv.BeginDragWorn(worn); fig.QueueRedraw(); }
+        };
+        fig.RegionRightClicked += (r, at) =>
+        {
+            if (inv.DragItem != null) return;
+            if (WornAt(r) is { } worn) inv.ShowWornMenu(worn, at);
+        };
+        inv.DragChanged += () => { if (IsInstanceValid(fig)) fig.QueueRedraw(); };
         left.AddChild(fig);
         var worn = p.Apparel.Where(a => Array.IndexOf(a.Def.Layers, _layer) >= 0).ToList();
         left.AddChild(UiKit.Label(worn.Count == 0 ? $"Nothing worn on the {_layer.ToString().ToLowerInvariant()} layer." : string.Join(", ", worn.Select(a => a.Def.Label)), 14, UiKit.Muted));
+        left.AddChild(UiKit.Label("Drag clothes from the body into the inventory to take them off, and back onto the body to wear them.", 12, new Color(UiKit.Muted, 0.85f)));
         row.AddChild(left);
 
         var right = UiKit.VBox(8);
@@ -295,8 +328,7 @@ public partial class InspectPanel : Control
             handsRow.AddChild(UiKit.Button("Put away", () => { Log.Action($"put away {held}"); _sim.Unequip(p); BuildTab(); }, 14));
             handsRow.AddChild(UiKit.Button("Drop", () => { Log.Action($"drop {held}"); _sim.DropFromInventory(p, held); BuildTab(); }, 14));
         }
-        // the whole tab is rebuilt after every inventory change so the hands, the figure and the load stay in sync
-        right.AddChild(new InventoryView(_sim, p, () => CallDeferred(MethodName.BuildTab)));
+        right.AddChild(inv);
         right.AddChild(handsRow);
         row.AddChild(right);
         return row;

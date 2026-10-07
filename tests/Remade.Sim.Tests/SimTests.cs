@@ -110,10 +110,23 @@ public class MapGenTests
         Assert.True(seaSide > landSide * 3);
     }
 
+    [Theory]
+    [InlineData(Hilliness.Flat, 0.0f, 0.08f)]
+    [InlineData(Hilliness.Hills, 0.08f, 0.3f)]
+    [InlineData(Hilliness.Mountainous, 0.55f, 0.85f)]
+    public void RockShareFollowsTheRelief(Hilliness hills, float min, float max)
+    {
+        int tile = Fixtures.TemperateTile((p, t) => p.Hills[t] == hills);
+        var m = MapGen.Generate(Fixtures.Planet, tile, 160, 4).Map;
+        int rock = 0;
+        for (int i = 0; i < m.CellCount; i++) if (m.Buildings[i] == Building.Granite) rock++;
+        Assert.InRange(rock / (float)m.CellCount, min, max);
+    }
+
     [Fact]
     public void OnlyGraniteRockAndItIsMinable()
     {
-        var m = MapGen.Generate(Fixtures.Planet, Fixtures.TemperateTile((p, t) => p.Hills[t] >= Hilliness.SmallHills), 128, 8).Map;
+        var m = MapGen.Generate(Fixtures.Planet, Fixtures.TemperateTile((p, t) => p.Hills[t] >= Hilliness.Hills), 128, 8).Map;
         int rock = 0;
         for (int i = 0; i < m.CellCount; i++)
         {
@@ -221,6 +234,29 @@ public class PathfinderTests
         m.DrainChanges(ch);
         grid.Apply(ch);
         Assert.True(grid.Reachable(m.Index(2, 2), m.Index(18, 2)));
+    }
+
+    [Fact]
+    public void LongPathsFollowTheRegionPlanAfterMapChanges()
+    {
+        var m = Fixtures.OpenMap(120, 60);
+        for (int y = 0; y < 60; y++) { m.Buildings[m.Index(60, y)] = Building.Granite; m.Terrain[m.Index(60, y)] = Terrain.RoughGranite; }
+        m.MineOut(m.Index(60, 55)); // one gap near the bottom
+        var ch = new List<CellChange>();
+        m.DrainChanges(ch);
+        var grid = new PathGrid(m);
+        var pf = new Pathfinder(grid);
+        var path = new List<Vector2>();
+        Assert.Equal(PathResult.Found, pf.FindPath(m.Index(5, 5), m.Index(115, 5), path));
+        Assert.Contains(path, p => p.Y > 50);
+        // a new gap near the top: the regions are rebuilt and the plan takes the short way
+        m.MineOut(m.Index(60, 4));
+        ch.Clear();
+        m.DrainChanges(ch);
+        grid.Apply(ch);
+        Assert.Equal(PathResult.Found, pf.FindPath(m.Index(5, 5), m.Index(115, 5), path));
+        Assert.All(path, p => Assert.True(p.Y < 20));
+        Assert.Equal(new Vector2(115.5f, 5.5f), path[^1]);
     }
 }
 
@@ -330,10 +366,12 @@ public class PawnTests
         var light = new Pawn { BodyMassKg = 50 }; light.CreateInventory();
         var heavy = new Pawn { BodyMassKg = 110 }; heavy.CreateInventory();
         var strong = new Pawn { BodyMassKg = 50 }; strong.Traits.Add(Traits.Get("strong_back")); strong.CreateInventory();
-        Assert.True(heavy.Inventory.H > light.Inventory.H);
+        int Slots(Pawn p) => p.Inventory.W * p.Inventory.H;
+        Assert.True(Slots(heavy) > Slots(light));
         Assert.Equal(60f, strong.CarryBasisKg, 3);
-        Assert.True(strong.Inventory.H >= light.Inventory.H);
-        Assert.Equal(Pawn.InventoryColumns, light.Inventory.W);
+        Assert.True(Slots(strong) > Slots(light));
+        // about one slot per kilogram of the march load
+        foreach (var p in new[] { light, heavy, strong }) Assert.InRange(Slots(p), p.CarryBasisKg * Pawn.MarchLoad * 0.85f, p.CarryBasisKg * Pawn.MarchLoad * 1.15f);
     }
 
     [Fact]

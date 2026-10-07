@@ -16,6 +16,11 @@ public partial class BodyFigure : Control
     public Func<BodyRegion, Color> RegionColor = _ => new Color(0.3f, 0.35f, 0.38f);
     public Func<BodyRegion, string> RegionTooltip = r => r.ToString();
     public event Action<BodyRegion> RegionClicked;
+    /// <summary>Left click anywhere on the figure (region or not, null) — used to drop dragged clothes.</summary>
+    public event Action<BodyRegion?> FigureClicked;
+    public event Action<BodyRegion, Vector2> RegionRightClicked;
+    /// <summary>Optional outline colour per region (drop targets while dragging clothes); null = normal.</summary>
+    public Func<BodyRegion, Color?> RegionOutline = _ => null;
     public BodyRegion? Hovered { get; private set; }
     public BodyRegion? SelectedRegion;
 
@@ -95,7 +100,9 @@ public partial class BodyFigure : Control
         var outline = new Vector2[poly.Length + 1];
         Array.Copy(poly, outline, poly.Length);
         outline[^1] = poly[0];
-        DrawPolyline(outline, hl ? UiKit.Accent : new Color(0.85f, 0.88f, 0.9f, 0.55f), hl ? 2.5f : 1.3f, true);
+        var mark = RegionOutline(r);
+        if (mark.HasValue) DrawPolyline(outline, mark.Value, 3f, true);
+        else DrawPolyline(outline, hl ? UiKit.Accent : new Color(0.85f, 0.88f, 0.9f, 0.55f), hl ? 2.5f : 1.3f, true);
     }
 
     BodyRegion? RegionAt(Vector2 local)
@@ -118,7 +125,15 @@ public partial class BodyFigure : Control
         else if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } mb)
         {
             var r = RegionAt(mb.Position);
+            FigureClicked?.Invoke(r);
             if (r.HasValue) { SelectedRegion = r; RegionClicked?.Invoke(r.Value); QueueRedraw(); }
+            AcceptEvent();
+        }
+        else if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Right } rb)
+        {
+            var r = RegionAt(rb.Position);
+            if (r.HasValue) RegionRightClicked?.Invoke(r.Value, rb.GlobalPosition);
+            AcceptEvent();
         }
     }
 

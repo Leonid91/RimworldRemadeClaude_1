@@ -21,6 +21,7 @@ varying float shade;
 varying vec3 vorigin;
 varying vec3 vworld;
 varying float bare;
+varying float vcloud; // the cloud shadow is constant over a plant: computed once per vertex
 
 void vertex() {
 	vec3 origin = MODEL_MATRIX[3].xyz;
@@ -39,6 +40,7 @@ void vertex() {
 	bare = winter_amount();
 	tint = mix(tint, pow(vec3(0.42, 0.30, 0.16), vec3(2.2)), bare * 0.8);
 	shade = COLOR.r;
+	vcloud = cloud_shadow(origin.xz) * 0.6 + 0.4;
 }
 
 void fragment() {
@@ -54,7 +56,7 @@ void fragment() {
 	c *= mix(0.72, 1.18, top);
 	c = mix(c, c * vec3(1.18, 1.12, 0.72), smoothstep(0.65, 0.95, top) * 0.55);
 	c = mix(c, vec3(0.6, 0.64, 0.71) * shade, snow_cover * smoothstep(0.3, 0.9, sph_n.y + 0.25) * 0.85);
-	c *= cloud_shadow(vorigin.xz) * 0.6 + 0.4;
+	c *= vcloud;
 	c *= mix(1.0, 0.8, wetness);
 	ALBEDO = c;
 	NORMAL = normalize((VIEW_MATRIX * vec4(sph_n, 0.0)).xyz);

@@ -16,7 +16,11 @@ public enum Biome : byte
 /// <summary>What kind of water a tile is: open sea (large connected body) or an inland lake.</summary>
 public enum WaterBody : byte { None, Ocean, Lake }
 
-public enum Hilliness : byte { Flat, SmallHills, LargeHills, Mountainous, Impassable }
+/// <summary>
+/// Relief of a region. Flat covers plains and plateaus (high but level ground): gentle local undulations and a
+/// little rock here and there. Hills: about half of the map rolls in hills. Mountainous: about three quarters rock.
+/// </summary>
+public enum Hilliness : byte { Flat, Hills, Mountainous, Impassable }
 
 public sealed class WorldParams
 {
@@ -76,8 +80,7 @@ public static class BiomeInfo
     public static string HillLabel(Hilliness h) => h switch
     {
         Hilliness.Flat => "Flat",
-        Hilliness.SmallHills => "Small hills",
-        Hilliness.LargeHills => "Large hills",
+        Hilliness.Hills => "Hills",
         Hilliness.Mountainous => "Mountainous",
         Hilliness.Impassable => "Impassable mountains",
         _ => throw new ArgumentOutOfRangeException(nameof(h), h, null),
@@ -461,16 +464,38 @@ public sealed class Planet
         for (int i = 0; i < n; i++)
         {
             Biomes[i] = Water[i] == WaterBody.Lake ? Biome.Lake : Classify(Elevation[i], MeanTemp[i], AnnualPrecip[i]);
+        }
+        ClassifyRelief();
+    }
+
+    /// <summary>
+    /// Relief from ruggedness (mountain ridges) and the slope to the neighbours — not from altitude, so a high plateau
+    /// is flat. Classes follow fixed shares of the land: about 70 % flat (plains and plateaus), 20 % hills,
+    /// 7 % mountains, 3 % impassable.
+    /// </summary>
+    void ClassifyRelief()
+    {
+        int n = Grid.TileCount;
+        var score = new float[n];
+        var land = new List<float>();
+        for (int i = 0; i < n; i++)
+        {
             if (Water[i] != WaterBody.None) { Hills[i] = Hilliness.Flat; continue; }
             float maxDiff = 0;
             foreach (int nb in Grid.Neighbors(i))
-                if (Elevation[nb] >= 0) maxDiff = MathF.Max(maxDiff, MathF.Abs(Elevation[nb] - Elevation[i]));
-            float score = maxDiff + Ruggedness[i] * 2600f + MathF.Max(0f, Elevation[i] - 1200f) * 0.35f;
-            Hills[i] = score < 260f ? Hilliness.Flat
-                : score < 650f ? Hilliness.SmallHills
-                : score < 1300f ? Hilliness.LargeHills
-                : score < 2600f ? Hilliness.Mountainous
-                : Hilliness.Impassable;
+                if (Water[nb] == WaterBody.None) maxDiff = MathF.Max(maxDiff, MathF.Abs(Elevation[nb] - Elevation[i]));
+            score[i] = maxDiff + Ruggedness[i] * 2600f;
+            land.Add(score[i]);
+        }
+        if (land.Count == 0) return;
+        land.Sort();
+        float Q(float q) => land[Math.Clamp((int)(q * land.Count), 0, land.Count - 1)];
+        float hills = Q(0.70f), mountains = Q(0.90f), impassable = Q(0.97f);
+        for (int i = 0; i < n; i++)
+        {
+            if (Water[i] != WaterBody.None) continue;
+            Hills[i] = score[i] < hills ? Hilliness.Flat : score[i] < mountains ? Hilliness.Hills
+                     : score[i] < impassable ? Hilliness.Mountainous : Hilliness.Impassable;
         }
     }
 
@@ -513,7 +538,7 @@ public sealed class Planet
         for (int i = 0; i < TileCount; i++)
         {
             if (!BiomeInfo.Playable(Biomes[i]) || Hills[i] == Hilliness.Impassable) continue;
-            float s = (preferRiver && RiverSize[i] > 0 ? 3f : 0f) + (Coast[i] || LakeShore[i] ? 1f : 0f) + (Hills[i] == Hilliness.SmallHills ? 1f : 0f)
+            float s = (preferRiver && RiverSize[i] > 0 ? 3f : 0f) + (Coast[i] || LakeShore[i] ? 1f : 0f) + (Hills[i] == Hilliness.Hills ? 1f : 0f)
                       - MathF.Abs(MeanTemp[i] - 11f) * 0.15f + Hash.Cell01(i, 7, Params.Seed) * 0.5f;
             if (s > bestScore) { bestScore = s; best = i; }
         }

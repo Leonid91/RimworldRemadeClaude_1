@@ -226,17 +226,25 @@ public sealed class Pawn
     public float CarryBasisKg => BodyMassKg * StatFactor(Stat.CarryCapacity);
 
     /// <summary>
-    /// Creates the inventory grid. Its number of slots follows the approach-march load (45 % of the carry basis):
-    /// roughly one 1×1 slot per kilogram, 8 columns wide.
+    /// Inventory grid size for a carry basis: about one 1×1 slot per kilogram of the approach-march load (45 % of
+    /// the carry basis), laid out 5–10 columns by 3–8 rows. A 45 kg colonist gets 7×3 = 21 slots, 60 kg 9×3 = 27,
+    /// 70 kg 8×4 = 32, 90 kg 8×5 = 40, 110 kg 8×6 = 48.
     /// </summary>
-    public void CreateInventory(int rows = -1)
+    public static (int cols, int rows) InventorySize(float carryBasisKg)
     {
-        if (Inventory != null) throw new InvalidOperationException($"{FullName} already has an inventory");
-        if (rows < 0) rows = Math.Clamp((int)MathF.Ceiling(CarryBasisKg * MarchLoad / InventoryColumns), 3, 12);
-        Inventory = new InventoryGrid("Inventory", InventoryColumns, rows);
+        int target = Math.Max(15, (int)MathF.Round(carryBasisKg * MarchLoad));
+        int rows = Math.Clamp((int)MathF.Round(target / 8f), 3, 8);
+        int cols = Math.Clamp((int)MathF.Round(target / (float)rows), 5, 10);
+        return (cols, rows);
     }
 
-    public const int InventoryColumns = 8;
+    /// <summary>Creates the inventory grid (size from <see cref="InventorySize"/>, or the given size when loading).</summary>
+    public void CreateInventory(int cols = -1, int rows = -1)
+    {
+        if (Inventory != null) throw new InvalidOperationException($"{FullName} already has an inventory");
+        if (cols < 0) (cols, rows) = InventorySize(CarryBasisKg);
+        Inventory = new InventoryGrid("Inventory", cols, rows);
+    }
 
     public float CarriedMass
     {

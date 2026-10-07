@@ -15,19 +15,28 @@ namespace Remade.Game.Render;
 /// </summary>
 public partial class FloraRenderer : Node3D
 {
-    const int Region = 128; // large regions: few MultiMesh draws (and shadow draws) per frame
+    // Godot culls and picks LOD per MultiMesh, never per instance: small regions let the camera frustum, the shadow
+    // frustum and the detail/low switch work tree by tree (128-cell regions drew thousands of off-screen trees in full
+    // detail, twice for the shadow splits)
+    const int Region = 32;
+    /// <summary>Distinct oak meshes (map variants are folded onto them): fewer MultiMeshes per region.</summary>
+    const int OakMeshes = 8;
     readonly GameSim _sim;
     readonly LocalMap _map;
     readonly int _rw, _rh;
     readonly RegionNode[] _regions;
-    readonly Models.Tree[] _oaks = new Models.Tree[PlantInfo.OakVariants];
+    readonly Models.Tree[] _oaks = new Models.Tree[OakMeshes];
     readonly ArrayMesh[] _bushes = new ArrayMesh[PlantInfo.BushVariants];
+    readonly ArrayMesh[] _bushShadows = new ArrayMesh[PlantInfo.BushVariants];
     readonly ArrayMesh _berries;
-    // grass field: [0] plain clumps (whole-cell slots), [1] yellow/white and [2] purple/blue flowers (2×2-cell slots)
-    readonly MultiMeshInstance3D[] _grass = new MultiMeshInstance3D[3];
+    // grass field: [0] plain clumps (whole-cell slots), [1] yellow/white and [2] purple/blue flowers (2×2-cell slots),
+    // each split into Tiles×Tiles MultiMeshes so the camera frustum culls the off-screen parts of the field
+    const int Tiles = 4;
+    readonly MultiMeshInstance3D[][] _grass = new MultiMeshInstance3D[3][];
+    int _grassSlots;
     readonly ShaderMaterial[] _grassMat = new ShaderMaterial[3];
     int _grassR;
-    public float DetailDistance = 60f;
+    public float DetailDistance = 48f;
     public int Instances { get; private set; }
 
     sealed class RegionNode
@@ -51,7 +60,7 @@ public partial class FloraRenderer : Node3D
         using (Log.Time("Flora models", 800))
         {
             for (int v = 0; v < _oaks.Length; v++) _oaks[v] = Models.Oak(v);
-            for (int v = 0; v < _bushes.Length; v++) _bushes[v] = Models.Bush(v);
+            for (int v = 0; v < _bushes.Length; v++) { _bushes[v] = Models.Bush(v); _bushShadows[v] = Models.Bush(v, shadowProxy: true); }
             _berries = Models.Berries();
         }
         BuildGrass(heightTex);
@@ -122,8 +131,8 @@ public partial class FloraRenderer : Node3D
         r.Root = new Node3D();
         AddChild(r.Root);
         int x0 = r.X * Region, y0 = r.Y * Region, x1 = Math.Min(_map.Width, x0 + Region), y1 = Math.Min(_map.Height, y0 + Region);
-        var oakXf = new List<Transform3D>[PlantInfo.OakVariants];
-        var oakTint = new List<Color>[PlantInfo.OakVariants];
+        var oakXf = new List<Transform3D>[OakMeshes];
+        var oakTint = new List<Color>[OakMeshes];
         var bushXf = new List<Transform3D>[PlantInfo.BushVariants];
         var bushTint = new List<Color>[PlantInfo.BushVariants];
         var berryXf = new List<Transform3D>();
@@ -148,7 +157,7 @@ public partial class FloraRenderer : Node3D
                     float s = (0.32f + grow * 0.78f) * (0.9f + Hash.Cell01(x, y, 62) * 0.24f);
                     float sx = s * (0.85f + Hash.Cell01(x, y, 14) * 0.35f), sy = s * (0.88f + Hash.Cell01(x, y, 15) * 0.28f);
                     var basis = new Basis(Vector3.Up, yaw).Scaled(new Vector3(sx, sy, sx * (0.9f + Hash.Cell01(x, y, 16) * 0.2f)));
-                    int ov = _map.PlantVariant[i] % PlantInfo.OakVariants;
+                    int ov = _map.PlantVariant[i] % OakMeshes;
                     (oakXf[ov] ??= new List<Transform3D>()).Add(new Transform3D(basis, new Vector3(px, g - 0.05f, pz)));
                     (oakTint[ov] ??= new List<Color>()).Add(tint);
                 }
@@ -167,12 +176,17 @@ public partial class FloraRenderer : Node3D
         {
             if (oakXf[v] == null) continue;
             // near: detailed mesh, shadows cast by the cheap low-LOD mesh (shadow-only); far: low-LOD mesh
+            // detail near, low far (cross-faded); shadows from the sparse proxy at every distance
             AddMM(r.Root, _oaks[v].Detail, oakXf[v], 0, DetailDistance, false, oakTint[v]);
-            AddMM(r.Root, _oaks[v].Low, oakXf[v], 0, DetailDistance, true, oakTint[v], shadowOnly: true);
-            AddMM(r.Root, _oaks[v].Low, oakXf[v], DetailDistance - 8, 0, true, oakTint[v]);
+            AddMM(r.Root, _oaks[v].Low, oakXf[v], DetailDistance - 8, 0, false, oakTint[v]);
+            AddMM(r.Root, _oaks[v].Shadow, oakXf[v], 0, 0, true, oakTint[v], shadowOnly: true);
         }
         for (int v = 0; v < bushXf.Length; v++)
-            if (bushXf[v] != null) AddMM(r.Root, _bushes[v], bushXf[v], 0, 160, true, bushTint[v]);
+        {
+            if (bushXf[v] == null) continue;
+            AddMM(r.Root, _bushes[v], bushXf[v], 0, 160, false, bushTint[v]);
+            AddMM(r.Root, _bushShadows[v], bushXf[v], 0, 90, true, bushTint[v], shadowOnly: true);
+        }
         if (berryXf.Count > 0)
         {
             r.Berries = AddMM(r.Root, _berries, berryXf, 0, 90, false, null, berryCustom: true);
@@ -229,8 +243,12 @@ public partial class FloraRenderer : Node3D
             _grassMat[k].SetShaderParameter("noise_tex", ProcTextures.Noise);
             _grassMat[k].SetShaderParameter("kind", k);
             _grassMat[k].SetShaderParameter("slot_cells", k == 0 ? 1f : 2f);
-            _grass[k] = new MultiMeshInstance3D { CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, MaterialOverride = _grassMat[k], Name = "Grass" + k };
-            AddChild(_grass[k]);
+            _grass[k] = new MultiMeshInstance3D[Tiles * Tiles];
+            for (int t = 0; t < Tiles * Tiles; t++)
+            {
+                _grass[k][t] = new MultiMeshInstance3D { CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, MaterialOverride = _grassMat[k], Name = $"Grass{k}_{t}" };
+                AddChild(_grass[k][t]);
+            }
         }
         SetGrassRadius(40);
     }
@@ -238,38 +256,43 @@ public partial class FloraRenderer : Node3D
     /// <summary>
     /// (Re)creates the slot pattern for a window radius (cells); density from the graphics settings. Slots are whole
     /// cells (pairs of cells for flowers) with a slot index in the custom data; the shader hashes everything else from
-    /// the world cell, so the field is identical wherever the window sits.
+    /// the world cell, so the field is identical wherever the window sits. Within a tile the instances are ordered slot
+    /// by slot (all first slots, then all second slots…), so drawing only the first instances thins the field evenly.
     /// </summary>
     public void SetGrassRadius(int r)
     {
         _grassR = r;
         float dens = Settings.GrassDensity;
-        for (int k = 0; k < 3; k++) _grass[k].Visible = dens > 0.01f;
-        if (dens <= 0.01f) return;
-        int perCell = dens > 1.1f ? 4 : 3;
+        bool on = dens > 0.01f;
+        for (int k = 0; k < 3; k++) foreach (var g in _grass[k]) g.Visible = on;
+        if (!on) return;
+        _grassSlots = dens > 1.1f ? 4 : 3;
         int side = r * 2;
         for (int k = 0; k < 3; k++)
         {
-            int step = k == 0 ? 1 : 2, slots = k == 0 ? perCell : 1;
-            int n = side / step;
-            var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseCustomData = true, Mesh = GrassClumps[k], InstanceCount = n * n * slots };
-            var buf = new float[mm.InstanceCount * 16];
-            int i = 0;
-            for (int y = 0; y < n; y++)
-                for (int x = 0; x < n; x++)
-                    for (int j = 0; j < slots; j++)
-                    {
-                        // basis = identity, origin = slot corner; custom.r = slot index / 8
-                        int o = i * 16;
-                        buf[o] = 1; buf[o + 3] = x * step;
-                        buf[o + 5] = 1;
-                        buf[o + 10] = 1; buf[o + 11] = y * step;
-                        buf[o + 12] = j / 8f;
-                        i++;
-                    }
-            mm.Buffer = buf;
-            _grass[k].Multimesh = mm;
-            _grass[k].CustomAabb = new Aabb(new Vector3(-2, -20, -2), new Vector3(side + 4, 80, side + 4));
+            int step = k == 0 ? 1 : 2, slots = k == 0 ? _grassSlots : 1;
+            int n = side / step / Tiles; // slots per tile side
+            for (int t = 0; t < Tiles * Tiles; t++)
+            {
+                var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseCustomData = true, Mesh = GrassClumps[k], InstanceCount = n * n * slots };
+                var buf = new float[mm.InstanceCount * 16];
+                int i = 0;
+                for (int j = 0; j < slots; j++)
+                    for (int y = 0; y < n; y++)
+                        for (int x = 0; x < n; x++)
+                        {
+                            // basis = identity, origin = slot corner within the tile; custom.r = slot index / 8
+                            int o = i * 16;
+                            buf[o] = 1; buf[o + 3] = x * step;
+                            buf[o + 5] = 1;
+                            buf[o + 10] = 1; buf[o + 11] = y * step;
+                            buf[o + 12] = j / 8f;
+                            i++;
+                        }
+                mm.Buffer = buf;
+                _grass[k][t].Multimesh = mm;
+                _grass[k][t].CustomAabb = new Aabb(new Vector3(-2, -20, -2), new Vector3(n * step + 4, 80, n * step + 4));
+            }
             _grassMat[k].SetShaderParameter("radius", (float)r);
             _grassMat[k].SetShaderParameter("slots_per_cell", (float)slots);
             _grassMat[k].SetShaderParameter("density_scale", Math.Min(1f, dens));
@@ -352,15 +375,26 @@ public partial class FloraRenderer : Node3D
 
     public void UpdateGrass(Vector3 focus, float camDistance)
     {
-        if (_grass[0].Multimesh == null) return;
+        if (_grass[0][0].Multimesh == null) return;
         bool show = GrassEnabled && camDistance < 95f && Settings.GrassDensity > 0.01f;
+        // zoomed out the blades are only a few pixels tall: fewer clumps per cell look the same and cost far less
+        int slots = camDistance < 34f ? _grassSlots : camDistance < 60f ? Math.Min(2, _grassSlots) : 1;
         for (int k = 0; k < 3; k++)
         {
-            _grass[k].Visible = show;
-            if (!show) continue;
-            // snap to whole slots (1 cell, or 2 cells for flowers) so slots always sit on the same world cells
             float step = k == 0 ? 1f : 2f;
-            _grass[k].Position = new Vector3(Mathf.Floor((focus.X - _grassR) / step) * step, 0, Mathf.Floor((focus.Z - _grassR) / step) * step);
+            // snap to whole slots (1 cell, or 2 cells for flowers) so slots always sit on the same world cells
+            var origin = new Vector3(Mathf.Floor((focus.X - _grassR) / step) * step, 0, Mathf.Floor((focus.Z - _grassR) / step) * step);
+            float tileSize = _grassR * 2f / Tiles;
+            for (int t = 0; t < Tiles * Tiles; t++)
+            {
+                var g = _grass[k][t];
+                g.Visible = show;
+                if (!show) continue;
+                g.Position = origin + new Vector3(t % Tiles * tileSize, 0, t / Tiles * tileSize);
+                var mm = g.Multimesh;
+                int perSlot = mm.InstanceCount / (k == 0 ? _grassSlots : 1);
+                mm.VisibleInstanceCount = k == 0 ? perSlot * slots : -1;
+            }
         }
     }
 }

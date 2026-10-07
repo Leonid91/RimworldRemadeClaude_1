@@ -24,6 +24,7 @@ varying float vh;
 varying vec3 vcol;
 varying vec2 vorigin;
 varying float vflower;
+varying float vcloud;
 
 void vertex() {
 	vec3 inst = MODEL_MATRIX[3].xyz;
@@ -89,6 +90,7 @@ void vertex() {
 	vcol = mix(vcol, vec3(0.6, 0.64, 0.71), snow_cover * (0.35 + 0.55 * vh));
 	vec3 nn = NORMAL;
 	nn.xz = rot * nn.xz;
+	vcloud = cloud_shadow(origin) * 0.5 + 0.5;
 	NORMAL = normalize(mix(nn, vec3(0.0, 1.0, 0.0), 0.82));
 }
 
@@ -96,7 +98,7 @@ void fragment() {
 	// two-sided cards: undo Godot's automatic back-face normal flip (the normal points up for both sides)
 	if (!FRONT_FACING) NORMAL = -NORMAL;
 	vec3 c = vcol * mix(0.55, 1.0, vh * vh);
-	c *= cloud_shadow(vorigin) * 0.5 + 0.5;
+	c *= vcloud;
 	c *= mix(1.0, 0.75, wetness);
 	ALBEDO = c;
 	ROUGHNESS = mix(0.65, 0.35, wetness);

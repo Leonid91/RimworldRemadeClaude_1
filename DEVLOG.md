@@ -222,3 +222,32 @@ Bug fixed
   * Both were anchored to the top of the screen.
 * Colonists could land on ground cut off from the cabin (and the bow) by water
   * They were placed around the map centre without checking that it connects to the cabin door; they now land on the nearest connected ground.
+
+## October 7th, 2026 - Body drag, relief, 60 fps - Commit 9
+
+Added:
+* Clothes are dragged from the body figure itself: click a garment on the body, drop it in the inventory to take it off; drag clothes from the inventory onto the body to put them on (covered regions light up green, or red when something is in the way); right-click the body for Take off / Take off and drop; the dragged item follows the cursor
+* Performance scenario "perf_forest_rain" (1500 map, dense forest, rain, close and mid zoom), GPU time in the perf readout, `--gfx-off=dof` and `--shadow-quality=N` for profiling
+* Unit tests: most land is flat with plateaus, rock share by relief class, inventory sizes
+* Pathfinding plans long trips on a graph of 16×16-cell sector regions first, then searches cells only along that corridor (cross-map paths on 1000×1000: 18 → 4.7 ms on average, p95 46 → 10 ms)
+
+Changed:
+* Relief: Flat (plains and plateaus, about 70 % of land, no icon), Hills, Mountainous, Impassable — classified from ruggedness and slope only, so high plateaus are flat; hills roll over about half of their map, mountains are about three quarters rock; three globe icons
+* Inventory size varies with the colonist: about one slot per kg of march load, 5–10 columns by 3–8 rows (7×3, 9×3, 8×4, 8×5…)
+* Creation screen lists worn clothes without their layer
+* Trees: 32-cell regions so culling and level of detail work tree by tree, 8 shared oak meshes, detail switched to the low mesh at 48 m, leaf cards buried inside crowns left out, shadows cast by opaque blob proxies; bushes likewise; grass field in 16 culled tiles, thinned when zoomed out; one shadow split beyond 24 m and shadow distance fitted to the view; cloud shading of plants computed per vertex
+* Removed the "Worn" tiles from the inventory (replaced by dragging on the body)
+
+Bug fixed
+* Frame rate fell to about 24 fps in forests on the largest map
+  * Trees were grouped in 128×128-cell MultiMeshes, which Godot culls and switches LOD as a whole, so thousands of off-screen trees were drawn in full detail, twice for the shadow splits, with every leaf card alpha-tested in the shadow pass.
+* Mountains could be seen through in first person
+  * Neighbouring cliff walls pushed their feet out in different directions, leaving slits at the corners, and the feet spread up to 0.7 m into the walkable cell so the camera could stand inside the rock.
+* Error "No vertices were added, surface can't be created"
+  * The aim mesh opened a surface even when there was nothing to draw (first-person view draws no arc).
+* Randomizing a colonist never changed the inventory size
+  * Almost every body mass rounded to the same 8×4 grid.
+* The globe showed hills almost everywhere
+  * High plateaus were counted as hills and most land fell into the two hill classes.
+* Long colonist paths could take 20–60 ms in one tick on the new, more open maps
+  * Plain A* flooded half the map whenever a river or lake forced a detour.

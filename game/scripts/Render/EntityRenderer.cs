@@ -29,6 +29,7 @@ public partial class EntityRenderer : Node3D
     readonly MeshInstance3D _selRing, _targetRing;
     readonly MeshInstance3D _aimLine;
     readonly ImmediateMesh _aimMesh = new();
+    readonly List<Vector3> _aimVerts = new();
     float[] _bufDoe = Array.Empty<float>(), _bufStag = Array.Empty<float>();
 
     public Pawn Selected;
@@ -303,7 +304,7 @@ public partial class EntityRenderer : Node3D
             float halfWidth = Math.Max(0.03f, CamDistance * 0.0016f);
             var cam = GetViewport().GetCamera3D();
             var camPos = cam?.GlobalPosition ?? Vector3.Zero;
-            _aimMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+            _aimVerts.Clear();
             if (p.HasRangedWeapon && p.Arrows > 0)
             {
                 // the predicted flight in 3D: from the bow along its arc to the first thing it would hit
@@ -329,7 +330,13 @@ public partial class EntityRenderer : Node3D
                 var dir = new Vector3(p.AimDir.X, 0, p.AimDir.Y);
                 Ribbon(from + dir * 0.3f, from + dir * AimRange, camPos, halfWidth);
             }
-            _aimMesh.SurfaceEnd();
+            // an empty surface is an engine error: only build it when there is something to draw
+            if (_aimVerts.Count > 0)
+            {
+                _aimMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+                foreach (var v in _aimVerts) _aimMesh.SurfaceAddVertex(v);
+                _aimMesh.SurfaceEnd();
+            }
         }
     }
 
@@ -344,7 +351,7 @@ public partial class EntityRenderer : Node3D
 
     void Quad(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
     {
-        _aimMesh.SurfaceAddVertex(a); _aimMesh.SurfaceAddVertex(c); _aimMesh.SurfaceAddVertex(b);
-        _aimMesh.SurfaceAddVertex(a); _aimMesh.SurfaceAddVertex(d); _aimMesh.SurfaceAddVertex(c);
+        _aimVerts.Add(a); _aimVerts.Add(c); _aimVerts.Add(b);
+        _aimVerts.Add(a); _aimVerts.Add(d); _aimVerts.Add(c);
     }
 }

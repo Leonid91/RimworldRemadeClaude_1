@@ -12,12 +12,14 @@ uniform float sway_amount = 1.0;
 
 varying vec3 vorigin;
 varying float vup;
+varying float vcloud;
 
 void vertex() {
 	vec3 origin = MODEL_MATRIX[3].xyz;
 	vorigin = origin;
 	VERTEX += tree_sway(noise_tex, VERTEX, origin, fract(INSTANCE_CUSTOM.a * 2.0) * 6.2831, sway_amount);
 	vup = NORMAL.y;
+	vcloud = cloud_shadow(origin.xz) * 0.6 + 0.4;
 }
 
 void fragment() {
@@ -26,7 +28,7 @@ void fragment() {
 	vec3 c = mix(col_a, col_b, s * 0.7 + s2 * 0.3);
 	c *= mix(0.6, 1.0, smoothstep(0.0, 0.7, UV.y));
 	c = mix(c, vec3(0.6, 0.64, 0.71), snow_cover * smoothstep(0.5, 0.9, vup) * 0.8);
-	c *= cloud_shadow(vorigin.xz) * 0.6 + 0.4;
+	c *= vcloud;
 	c *= mix(1.0, 0.7, wetness);
 	ALBEDO = c;
 	ROUGHNESS = 0.9;

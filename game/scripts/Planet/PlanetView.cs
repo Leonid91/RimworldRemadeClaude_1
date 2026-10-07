@@ -233,7 +233,7 @@ public partial class PlanetView : SubViewportContainer
     // ------------------------------------------------------------------ relief icons
 
     /// <summary>
-    /// Hills, mountains and impassable mountains drawn as small painted icons lying on their hexagon (one MultiMesh
+    /// Hills, mountains and impassable mountains (flat plains and plateaus have none) drawn as small painted icons lying on their hexagon (one MultiMesh
     /// quad per hilly land tile, kept well inside the hexagon).
     /// </summary>
     void BuildIcons()
@@ -255,8 +255,8 @@ public partial class PlanetView : SubViewportContainer
             var north = n.Cross(east).Normalized();
             var basis = new Basis(east * size, north * size, n * size);
             mm.SetInstanceTransform(k, new Transform3D(basis, n * 1.0018f));
-            int kind = (int)p.Hills[tiles[k]] - 1; // 0 small hills, 1 large hills, 2 mountains, 3 impassable
-            mm.SetInstanceCustomData(k, new Color(kind / 4f + 0.01f, 0, 0, 0));
+            int kind = (int)p.Hills[tiles[k]] - 1; // 0 hills, 1 mountains, 2 impassable
+            mm.SetInstanceCustomData(k, new Color(kind / 3f + 0.01f, 0, 0, 0));
         }
         var mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/planet_icons.gdshader") };
         mat.SetShaderParameter("atlas", ReliefIcons.Atlas);

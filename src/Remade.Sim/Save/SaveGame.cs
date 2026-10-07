@@ -497,8 +497,8 @@ public static class SaveGame
         for (int i = 0; i < apparel; i++) p.Wear(ReadItem(r));
         if (r.ReadBoolean()) p.Held = ReadItem(r);
         int iw = r.ReadInt32(), ih = r.ReadInt32();
-        if (iw != Pawn.InventoryColumns || ih < 1 || ih > 20) throw new InvalidDataException($"pawn {p.Id}: inventory {iw}x{ih}");
-        p.CreateInventory(ih);
+        if (iw < 1 || iw > 20 || ih < 1 || ih > 20) throw new InvalidDataException($"pawn {p.Id}: inventory {iw}x{ih}");
+        p.CreateInventory(iw, ih);
         int n = r.ReadInt32();
         for (int i = 0; i < n; i++)
         {

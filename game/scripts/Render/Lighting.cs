@@ -167,8 +167,12 @@ public partial class Lighting : Node3D
         _e.FogDepthBegin = 0;
 
         // shadow distance follows zoom
-        _sun.DirectionalShadowMaxDistance = Mathf.Clamp(camDistance * 1.9f, 35f, 220f);
-        _moon.DirectionalShadowMaxDistance = Mathf.Clamp(camDistance * 1.8f, 30f, 160f);
+        // zoomed out, one shadow split covers the view at plenty of resolution and halves the shadow work
+        if (Settings.ShadowQuality < 3)
+            _sun.DirectionalShadowMode = camDistance > 24f ? DirectionalLight3D.ShadowMode.Orthogonal : DirectionalLight3D.ShadowMode.Parallel2Splits;
+        // shadows cover what the camera shows (the visible ground reaches about 1.3× the camera distance)
+        _sun.DirectionalShadowMaxDistance = Mathf.Clamp(camDistance * 1.35f + 12f, 35f, 160f);
+        _moon.DirectionalShadowMaxDistance = Mathf.Clamp(camDistance * 1.3f + 10f, 30f, 120f);
 
         // shader globals
         float windK = Mathf.Clamp(w.WindSpeed / 12f, 0.05f, 1.5f);

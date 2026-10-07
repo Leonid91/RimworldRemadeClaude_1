@@ -16,7 +16,8 @@ public static class Models
 {
     public sealed class Tree
     {
-        public ArrayMesh Detail, Low;
+        /// <summary>Detail (near), Low (far) and Shadow: a sparse proxy of few large cards that only casts shadows.</summary>
+        public ArrayMesh Detail, Low, Shadow;
         public float Height, Crown;
     }
 
@@ -53,6 +54,8 @@ public static class Models
         tree.Detail = BuildOak(ref r1, detailed: true, out tree.Height, out tree.Crown);
         var r2 = new Rng(seed);
         tree.Low = BuildOak(ref r2, detailed: false, out _, out _);
+        var r3 = new Rng(seed);
+        tree.Shadow = BuildOak(ref r3, detailed: false, out _, out _, shadowProxy: true);
         return tree;
     }
 
@@ -61,11 +64,11 @@ public static class Models
     /// the limb ends plus a crown on top (about 4.5 m in all). The low LOD has the same skeleton with a quarter of the
     /// leaf cards, 1.6× larger.
     /// </summary>
-    static ArrayMesh BuildOak(ref Rng r, bool detailed, out float height, out float crown)
+    static ArrayMesh BuildOak(ref Rng r, bool detailed, out float height, out float crown, bool shadowProxy = false)
     {
         var bark = new MeshBuilder { Color = Colors.White };
         var leaves = new MeshBuilder();
-        int sides = detailed ? 9 : 5;
+        int sides = detailed ? 9 : shadowProxy ? 4 : 5;
         float trunkH = r.Range(1.9f, 2.6f), r0 = r.Range(0.17f, 0.23f);
         var lean = new Vector3(r.Range(-0.25f, 0.25f), 0, r.Range(-0.25f, 0.25f));
         var p0 = new Vector3(0, -0.15f, 0);
@@ -91,7 +94,7 @@ public static class Models
             var dir = new Vector3(Mathf.Cos(a) * 0.8f, r.Range(0.5f, 0.9f), Mathf.Sin(a) * 0.8f).Normalized();
             float len = r.Range(1.0f, 1.6f);
             var end = start + dir * len;
-            bark.Tube(start, end, r0 * 0.5f, r0 * 0.16f, detailed ? 6 : 4, 0, len);
+            if (!shadowProxy) bark.Tube(start, end, r0 * 0.5f, r0 * 0.16f, detailed ? 6 : 4, 0, len); // limbs: too thin to matter in shadows
             var mid = start.Lerp(end, 0.55f);
             var sdir = (dir + new Vector3(r.Range(-0.7f, 0.7f), 0.3f, r.Range(-0.7f, 0.7f))).Normalized();
             var send = mid + sdir * len * 0.55f;
@@ -113,16 +116,26 @@ public static class Models
         }
         foreach (var c in clusters)
         {
+            if (shadowProxy)
+            {
+                // shadows: one solid lumpy blob per leaf cluster — opaque geometry renders into the shadow map without
+                // running the leaf texture test on every card, at a fraction of the cost, with the same soft outline
+                // only the main clusters (the small side clusters hide inside their shadow)
+                if (c.rad >= 0.8f) bark.Ellipsoid(c.c, new Vector3(c.rad * 1.05f, c.rad * 0.85f, c.rad * 1.05f), 5, 3);
+                continue;
+            }
             int cards = (int)(c.rad * c.rad * 30 + 8);
             float size = r.Range(0.85f, 1.05f);
-            if (!detailed) { cards = Math.Max(3, cards / 4); size *= 1.6f; }
+            // detail: 80 % of the prototype's cards, a little larger (same coverage, less overdraw); low LOD: a quarter
+            if (detailed) { cards = Math.Max(4, cards * 4 / 5); size *= 1.1f; }
+            else { cards = Math.Max(3, cards / 4); size *= 1.6f; }
             LeafCluster(ref r, leaves, c.c, c.rad, cc, cr, cards, size, bottom, top);
         }
         height = top;
         crown = cr;
         var mesh = new ArrayMesh();
         bark.CommitTo(mesh, BarkMaterial);
-        leaves.CommitTo(mesh, LeafMaterial);
+        if (!shadowProxy) leaves.CommitTo(mesh, LeafMaterial);
         return mesh;
     }
 
@@ -148,6 +161,8 @@ public static class Models
             var d = RandDir(ref r);
             d.Y = d.Y * 0.75f + 0.12f;
             var pos = center + d * radius * Mathf.Pow(r.NextFloat(), 0.35f) * 0.9f;
+            // cards buried deep in the crown are never seen from outside: most are left out (less overdraw)
+            if ((pos - canopyC).Length() < canopyR * 0.42f && r.NextFloat() < 0.75f) continue;
             var outward = (pos - canopyC).Normalized();
             var cn = (RandDir(ref r) + outward * 0.9f + Vector3.Up * 0.4f).Normalized();
             var tmp = Mathf.Abs(cn.Y) < 0.9f ? Vector3.Up : Vector3.Right;
@@ -179,7 +194,7 @@ public static class Models
     // ------------------------------------------------------------------ berry bush
 
     /// <summary>A round bush of 3–5 leaf clusters (first prototype's model), about 0.9 m tall.</summary>
-    public static ArrayMesh Bush(int variant)
+    public static ArrayMesh Bush(int variant, bool shadowProxy = false)
     {
         var r = new Rng(5000UL + (ulong)variant);
         var leaves = new MeshBuilder();
@@ -193,9 +208,17 @@ public static class Models
             var c = new Vector3(Mathf.Cos(a) * 0.25f, r.Range(0.3f, 0.5f), Mathf.Sin(a) * 0.25f) * scale;
             clusters.Add((c, r.Range(0.32f, 0.48f) * scale));
         }
+        var m = new ArrayMesh();
+        if (shadowProxy)
+        {
+            // shadows: solid blobs (see BuildOak)
+            var blob = new MeshBuilder { Color = Colors.White };
+            foreach (var (c, rad) in clusters) blob.Ellipsoid(c, new Vector3(rad, rad * 0.85f, rad), 5, 3);
+            blob.CommitTo(m, BarkMaterial);
+            return m;
+        }
         foreach (var (c, rad) in clusters)
             LeafCluster(ref r, leaves, c, rad, cc, 0.75f * scale, (int)(rad * rad * 110 + 6), 0.55f * scale, 0f, 0.9f * scale);
-        var m = new ArrayMesh();
         leaves.CommitTo(m, LeafMaterial);
         return m;
     }
